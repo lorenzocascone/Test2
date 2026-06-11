@@ -1,0 +1,49 @@
+# Deploys the game as a static site to GitHub Pages.
+# Runs on every push to the listed branches (and can be triggered manually
+# from the Actions tab via workflow_dispatch).
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - claude/sailing-game-prototype-wt3v0f
+      - main
+  workflow_dispatch:
+
+# The Pages deploy action needs these scopes on the workflow token.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; newer pushes supersede older runs.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # enablement: true asks GitHub to switch Pages on for the repo
+      # automatically if it isn't already.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      # The whole repo root is the site — index.html lives at the top level.
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
