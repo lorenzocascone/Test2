@@ -472,6 +472,90 @@ body {
 }
 
 /* --------------------------------------------------------------------------
+   Damage flash — a red vignette that blinks when the hull takes a hit.
+   The engine re-adds .flash on every hit to restart the animation.
+   -------------------------------------------------------------------------- */
+#damage-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(180, 30, 25, 0) 55%,
+    rgba(180, 30, 25, 0.55) 100%
+  );
+}
+
+#damage-flash.flash {
+  animation: damage-blink 0.45s ease-out;
+}
+
+@keyframes damage-blink {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* --------------------------------------------------------------------------
+   Game Over overlay
+   -------------------------------------------------------------------------- */
+#game-over {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: rgba(4, 8, 14, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-over-panel {
+  text-align: center;
+  background: #16222e;
+  border: 2px solid rgba(200, 168, 100, 0.5);
+  border-radius: 12px;
+  padding: 36px 48px;
+  box-shadow: 0 10px 50px rgba(0, 0, 0, 0.8);
+  animation: gameover-rise 0.6s ease-out;
+}
+
+@keyframes gameover-rise {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+#game-over-panel h2 {
+  font-family: "Pirata One", "Trebuchet MS", cursive;
+  font-weight: normal;
+  font-size: 44px;
+  letter-spacing: 2px;
+  color: #e0524f;
+  margin-bottom: 10px;
+}
+
+#game-over-stats {
+  font-size: 15px;
+  opacity: 0.8;
+  margin-bottom: 24px;
+}
+
+#btn-restart {
+  font-family: "Pirata One", "Trebuchet MS", cursive;
+  font-size: 22px;
+  letter-spacing: 1.5px;
+  color: #1a1a1a;
+  background: #f0d080;
+  border: 2px solid #8a6a3c;
+  border-radius: 8px;
+  padding: 10px 30px;
+  cursor: pointer;
+}
+
+#btn-restart:hover {
+  background: #ffe49a;
+}
+
+/* --------------------------------------------------------------------------
    Touch controls — two button clusters anchored to the bottom corners,
    sized for thumbs. Hidden entirely on devices with a fine pointer
    (mouse/trackpad); shown only where the primary pointer is coarse (touch).
@@ -494,6 +578,21 @@ body {
 
 #touch-sails {
   right: calc(16px + env(safe-area-inset-right));
+}
+
+/* Fire button: above the sail cluster, where the right thumb rolls up */
+#touch-fire {
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(108px + env(safe-area-inset-bottom));
+}
+
+.touch-btn-fire {
+  border-color: rgba(224, 82, 79, 0.7);
+}
+
+.touch-btn-fire.active {
+  background: rgba(224, 82, 79, 0.4);
+  border-color: #e0524f;
 }
 
 .touch-btn {

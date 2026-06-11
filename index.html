@@ -70,8 +70,12 @@
         <span class="stat-label">Cargo</span>
         <span class="stat-value" id="stat-cargo">0/0</span>
       </div>
+      <div class="stat">
+        <span class="stat-label">Hull</span>
+        <span class="stat-value" id="stat-hull">100</span>
+      </div>
       <div id="controls-hint">
-        W/&#8593; raise sails &middot; S/&#8595; lower sails &middot; A/D or &#8592;/&#8594; steer &middot; E dock &middot; M chart
+        W/&#8593; sails up &middot; S/&#8595; sails down &middot; A/D steer &middot; Space fire &middot; E dock &middot; M chart
       </div>
     </div>
 
@@ -84,6 +88,13 @@
       <div class="touch-cluster" id="touch-steer">
         <button class="touch-btn" data-action="left" aria-label="Steer left">&#10094;</button>
         <button class="touch-btn" data-action="right" aria-label="Steer right">&#10095;</button>
+      </div>
+      <!-- Right thumb, upper: broadside! -->
+      <div class="touch-cluster" id="touch-fire">
+        <button class="touch-btn touch-btn-fire" data-action="fire" aria-label="Fire broadside">
+          <span class="touch-btn-glyph">&#128165;</span>
+          <span class="touch-btn-label">Fire</span>
+        </button>
       </div>
       <!-- Right thumb: sail trim -->
       <div class="touch-cluster" id="touch-sails">
@@ -139,12 +150,13 @@
           <button class="port-tab" data-tab="market">Market</button>
         </div>
 
-        <!-- Tavern: recruiting and rumors -->
+        <!-- Tavern: recruiting, repairs and rumors -->
         <div id="tab-tavern" class="tab-pane active">
           <p id="tavern-flavor" class="flavor-text"></p>
           <div class="tavern-actions">
             <button id="btn-recruit">Recruit a sailor &mdash; 25g</button>
             <button id="btn-recruit5">Buy a round (+5 crew) &mdash; 110g</button>
+            <button id="btn-repair">Careen &amp; repair hull &mdash; 40g</button>
             <button id="btn-rumor">Buy a rumor &mdash; 15g</button>
           </div>
           <p id="rumor-box" class="flavor-text"></p>
@@ -163,6 +175,20 @@
         </div>
         <p id="menu-status"></p>
 
+      </div>
+    </div>
+
+    <!-- Red vignette flash when the player's hull takes a hit -->
+    <div id="damage-flash"></div>
+
+    <!-- ==================================================================
+         Game Over — shown when the player's hull reaches zero.
+         ================================================================== -->
+    <div id="game-over" class="hidden">
+      <div id="game-over-panel">
+        <h2>Davy Jones Claims Ye</h2>
+        <p id="game-over-stats"></p>
+        <button id="btn-restart">Sail Again</button>
       </div>
     </div>
 

@@ -114,6 +114,7 @@ export class PirateMap {
     }
 
     this._drawLandmarks(ctx, s);
+    this._drawShipsSighted(ctx, s);
     this._drawPorts(ctx, s);
     this._drawCompassRose(ctx, w - 64, h - 64);
     this._drawPlayer(ctx, s, time);
@@ -144,6 +145,17 @@ export class PirateMap {
       ctx.font = "13px 'Pirata One', 'Trebuchet MS', cursive";
       ctx.textAlign = "center";
       ctx.fillText(port.name, x, y - 10);
+    }
+  }
+
+  /** Other sails on the horizon: black dots for pirates, ink for traders. */
+  _drawShipsSighted(ctx, s) {
+    for (const enemy of this.engine.enemies) {
+      if (!enemy.alive) continue;
+      ctx.fillStyle = enemy.aggressive ? "#1a1a1a" : INK_FADED;
+      ctx.beginPath();
+      ctx.arc(enemy.x * s, enemy.y * s, enemy.aggressive ? 3 : 2.4, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 

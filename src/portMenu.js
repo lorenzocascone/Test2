@@ -17,6 +17,7 @@ import { GOODS } from "./port.js";
 const RECRUIT_COST = 25;   // one sailor
 const ROUND_COST = 110;    // a round of drinks: five sailors sign on
 const RUMOR_COST = 15;
+const REPAIR_COST = 40;    // careen the hull back to full health
 
 // A little faction color for the tavern tab.
 const TAVERN_FLAVOR = {
@@ -53,6 +54,7 @@ export class PortMenu {
       tavernFlavor: document.getElementById("tavern-flavor"),
       btnRecruit: document.getElementById("btn-recruit"),
       btnRecruit5: document.getElementById("btn-recruit5"),
+      btnRepair: document.getElementById("btn-repair"),
       btnRumor: document.getElementById("btn-rumor"),
       rumorBox: document.getElementById("rumor-box"),
       marketRows: document.getElementById("market-rows"),
@@ -71,6 +73,7 @@ export class PortMenu {
 
     this.el.btnRecruit.addEventListener("click", () => this._recruit(1, RECRUIT_COST));
     this.el.btnRecruit5.addEventListener("click", () => this._recruit(5, ROUND_COST));
+    this.el.btnRepair.addEventListener("click", () => this._repair());
     this.el.btnRumor.addEventListener("click", () => this._buyRumor());
 
     // Market buy/sell buttons are re-created on every render, so we use
@@ -230,6 +233,22 @@ export class PortMenu {
     state.gold -= cost;
     state.crew += count;
     this._setStatus(count === 1 ? "A sailor signs on." : `${count} sailors stagger aboard.`);
+    this._renderFooter();
+  }
+
+  /** The shipwrights haul her over and patch the hull back to full. */
+  _repair() {
+    const state = this.engine.state;
+    const ship = this.engine.ship;
+    if (ship.hull >= ship.maxHull) {
+      return this._setStatus("The hull is already sound.");
+    }
+    if (state.gold < REPAIR_COST) {
+      return this._setStatus("The shipwright doesn't work on credit.");
+    }
+    state.gold -= REPAIR_COST;
+    ship.hull = ship.maxHull;
+    this._setStatus("Fresh planks and pitch — good as new.");
     this._renderFooter();
   }
 

@@ -86,6 +86,11 @@ export class Ship {
     // lowers this with W/S; actual drive force = sail * windEfficiency.
     this.sail = 0;
 
+    // --- Combat -------------------------------------------------------------
+    this.maxHull = 100;
+    this.hull = 100;   // reaches 0 → game over (engine handles it)
+    this.reload = 0;   // seconds until the next broadside is ready
+
     // --- Cosmetic ---------------------------------------------------------
     this.length = 48; // used by the renderer for the hull size
     this.width = 20;

@@ -15,6 +15,8 @@ import { Port, GOODS } from "./port.js";
 import { PortMenu } from "./portMenu.js";
 import { WORLD, WorldRenderer, LANDMARKS } from "./world.js";
 import { PirateMap } from "./map.js";
+import { EnemyShip } from "./enemy.js";
+import { Cannonball, Loot } from "./combat.js";
 
 // ---------------------------------------------------------------------------
 // World tuning
@@ -26,6 +28,23 @@ const WORLD_HEIGHT = WORLD.height;
 
 /** Number of drifting wind-streak particles visualizing the breeze. */
 const WIND_STREAK_COUNT = 30;
+
+/** Seconds between player broadsides. */
+const PLAYER_RELOAD = 1.6;
+
+/** Hull damage per player / enemy cannonball. */
+const PLAYER_BALL_DAMAGE = 10;
+const ENEMY_BALL_DAMAGE = 7;
+
+/** Cannonballs hit anything within this distance of a ship's center. */
+const HIT_RADIUS = 22;
+
+/** Sail within this distance of floating loot to scoop it up. */
+const LOOT_PICKUP_RADIUS = 55;
+
+/** The sea keeps this many AI ships on it, topped up periodically. */
+const ENEMY_POPULATION = 6;
+const ENEMY_RESPAWN_INTERVAL = 20;
 
 /** How quickly the camera eases toward the ship (1/s). Lower = floatier. */
 const CAMERA_LERP = 3.0;
@@ -103,7 +122,7 @@ export class Engine {
     // Input — a simple pressed-key map fed by keydown/keyup listeners.
     // WASD and arrow keys are normalized into four logical directions.
     // -----------------------------------------------------------------
-    this.input = { up: false, down: false, left: false, right: false };
+    this.input = { up: false, down: false, left: false, right: false, fire: false };
     this._bindInput();
     this._bindTouchControls();
 
@@ -149,6 +168,24 @@ export class Engine {
     this.pirateMap = new PirateMap(this);
 
     // -----------------------------------------------------------------
+    // Combat state: AI ships, cannonballs in flight, loot on the water.
+    // -----------------------------------------------------------------
+    this.enemies = [
+      new EnemyShip({ x: 4800, y: 1000, faction: "Pirate" }),
+      new EnemyShip({ x: 3200, y: 4800, faction: "Pirate" }),
+      new EnemyShip({ x: 5200, y: 3600, faction: "Pirate" }),
+      new EnemyShip({ x: 2000, y: 2200, faction: "Spanish" }),
+      new EnemyShip({ x: 3800, y: 3000, faction: "English" }),
+      new EnemyShip({ x: 1200, y: 3800, faction: "French" }),
+    ];
+    this.cannonballs = [];
+    this.loot = [];
+    this._respawnTimer = ENEMY_RESPAWN_INTERVAL;
+
+    this.gameOver = false;
+    document.getElementById("btn-restart").addEventListener("click", () => location.reload());
+
+    // -----------------------------------------------------------------
     // Wind streaks: faint lines drifting with the wind so you can read
     // the breeze at a glance without checking the HUD. Spawned lazily
     // into the current viewport, recycled when they drift out.
@@ -169,8 +206,12 @@ export class Engine {
       shipSpeed: document.getElementById("stat-ship-speed"),
       sails: document.getElementById("stat-sails"),
       cargo: document.getElementById("stat-cargo"),
+      hull: document.getElementById("stat-hull"),
       dockPrompt: document.getElementById("dock-prompt"),
       dockPortName: document.getElementById("dock-port-name"),
+      damageFlash: document.getElementById("damage-flash"),
+      gameOver: document.getElementById("game-over"),
+      gameOverStats: document.getElementById("game-over-stats"),
     };
 
     // Tapping/clicking the dock prompt docks too (mobile has no E key).
@@ -197,6 +238,7 @@ export class Engine {
       KeyS: "down", ArrowDown: "down",
       KeyA: "left", ArrowLeft: "left",
       KeyD: "right", ArrowRight: "right",
+      Space: "fire",
     };
 
     window.addEventListener("keydown", (e) => {
@@ -228,6 +270,7 @@ export class Engine {
     // leaving a key "stuck down" — clear everything to be safe.
     window.addEventListener("blur", () => {
       this.input.up = this.input.down = this.input.left = this.input.right = false;
+      this.input.fire = false;
     });
   }
 
@@ -350,7 +393,10 @@ export class Engine {
 
     // Land is solid: ground the ship on coastlines, rocks, and the
     // lighthouse plinth rather than letting it sail over them.
-    this._resolveLandCollisions();
+    this._resolveLandCollisions(this.ship);
+
+    // Combat: guns, AI ships, cannonballs in flight, loot on the water.
+    this._updateCombat(dt);
 
     // Hungry crew nibble away at the food stores (from the cargo hold).
     this.state.cargo.food = Math.max(
@@ -391,6 +437,230 @@ export class Engine {
   }
 
   // =======================================================================
+  // Combat
+  // =======================================================================
+
+  /** Advance guns, enemies, cannonballs and loot by dt seconds. */
+  _updateCombat(dt) {
+    const ship = this.ship;
+
+    // --- Player guns ------------------------------------------------------
+    ship.reload -= dt;
+    if (this.input.fire && ship.reload <= 0) {
+      ship.reload = PLAYER_RELOAD;
+      // Cargo cannons crew extra guns: 2 per side stock, up to 6.
+      const ballsPerSide = 2 + Math.min(4, Math.floor(this.state.cargo.cannons));
+      this._fireBroadside(ship, [-1, 1], ballsPerSide, "player", PLAYER_BALL_DAMAGE);
+    }
+
+    // --- Enemy ships --------------------------------------------------------
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const enemy = this.enemies[i];
+      enemy.update(dt, ship, this.state.wind, this.world);
+
+      if (enemy.alive) {
+        this._resolveLandCollisions(enemy);
+
+        // Don't let hulls overlap: simple mutual push-apart vs the player.
+        const dx = enemy.x - ship.x;
+        const dy = enemy.y - ship.y;
+        const d = Math.hypot(dx, dy);
+        if (d < 44 && d > 0.001) {
+          enemy.x += (dx / d) * (44 - d);
+          enemy.y += (dy / d) * (44 - d);
+          enemy.speed *= 0.9;
+          ship.speed *= 0.9;
+        }
+
+        if (enemy.wantsToFire) {
+          enemy.wantsToFire = false;
+          const balls = enemy.faction === "Pirate" ? 3 : 2;
+          this._fireBroadside(enemy, [enemy.fireSide], balls, "enemy", ENEMY_BALL_DAMAGE);
+        }
+      } else if (enemy.sinking <= 0) {
+        // Fully under: gone for good.
+        this.enemies.splice(i, 1);
+      }
+    }
+
+    // --- Respawn: keep the sea populated ------------------------------------
+    this._respawnTimer -= dt;
+    if (this._respawnTimer <= 0) {
+      this._respawnTimer = ENEMY_RESPAWN_INTERVAL;
+      if (this.enemies.length < ENEMY_POPULATION) this._spawnEnemy();
+    }
+
+    // --- Cannonballs ---------------------------------------------------------
+    for (let i = this.cannonballs.length - 1; i >= 0; i--) {
+      const ball = this.cannonballs[i];
+      ball.update(dt);
+
+      let dead = ball.expired || this._ballHitsLand(ball);
+
+      if (!dead && ball.owner === "player") {
+        for (const enemy of this.enemies) {
+          if (!enemy.alive) continue;
+          if (Math.hypot(enemy.x - ball.x, enemy.y - ball.y) < HIT_RADIUS) {
+            const sunk = enemy.takeDamage(ball.damage);
+            if (sunk) this._dropLoot(enemy);
+            dead = true;
+            break;
+          }
+        }
+      } else if (!dead && ball.owner === "enemy") {
+        if (Math.hypot(this.ship.x - ball.x, this.ship.y - ball.y) < HIT_RADIUS) {
+          this._damagePlayer(ball.damage);
+          dead = true;
+        }
+      }
+
+      if (dead) this.cannonballs.splice(i, 1);
+    }
+
+    // --- Loot: drift, despawn, pick up ----------------------------------------
+    for (let i = this.loot.length - 1; i >= 0; i--) {
+      const item = this.loot[i];
+      item.update(dt);
+
+      if (item.expired) {
+        this.loot.splice(i, 1);
+        continue;
+      }
+      if (Math.hypot(item.x - ship.x, item.y - ship.y) > LOOT_PICKUP_RADIUS) continue;
+
+      if (item.type === "gold") {
+        this.state.gold += item.amount;
+        this.loot.splice(i, 1);
+      } else {
+        // Cargo loot only fits if there's hold space (by weight). Collect
+        // what fits; any remainder keeps bobbing for a later pass.
+        const weight = GOODS[item.type].weight;
+        const free = this.state.maxCargo - this.cargoUsed();
+        const take = Math.min(item.amount, Math.floor(free / weight));
+        if (take > 0) {
+          this.state.cargo[item.type] += take;
+          item.amount -= take;
+          if (item.amount <= 0) this.loot.splice(i, 1);
+        }
+      }
+    }
+  }
+
+  /**
+   * Fire a volley from a ship's flanks, perpendicular to its keel.
+   *
+   * @param {object} shooter        anything with x/y/angle/length/width
+   * @param {number[]} sides        [-1, 1] for a full double broadside,
+   *                                or a single side for AI shots
+   * @param {number} ballsPerSide   guns run out along the hull
+   * @param {string} owner          "player" | "enemy"
+   * @param {number} damage         per ball
+   */
+  _fireBroadside(shooter, sides, ballsPerSide, owner, damage) {
+    for (const side of sides) {
+      for (let i = 0; i < ballsPerSide; i++) {
+        // Space the gunports evenly along the middle of the hull.
+        const frac = ballsPerSide === 1 ? 0 : i / (ballsPerSide - 1) - 0.5;
+        const along = frac * shooter.length * 0.6;
+        const mx =
+          shooter.x + Math.cos(shooter.angle) * along -
+          Math.sin(shooter.angle) * side * (shooter.width / 2);
+        const my =
+          shooter.y + Math.sin(shooter.angle) * along +
+          Math.cos(shooter.angle) * side * (shooter.width / 2);
+        // Perpendicular to the keel, with a touch of gunner's scatter.
+        const dir = shooter.angle + (side * Math.PI) / 2 + (Math.random() - 0.5) * 0.12;
+        this.cannonballs.push(new Cannonball(mx, my, dir, owner, damage));
+      }
+    }
+  }
+
+  /** Cannonballs that reach land thud into the beach and vanish. */
+  _ballHitsLand(ball) {
+    const islands = this.world.islands;
+    for (let i = 0; i < islands.length; i++) {
+      const isle = islands[i];
+      const dx = ball.x - isle.x;
+      const dy = ball.y - isle.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > isle.r * 1.25) continue;
+      if (dist < this.world.coastRadius(i, Math.atan2(dy, dx))) return true;
+    }
+    return false;
+  }
+
+  /** Scatter floating plunder where an enemy went down. */
+  _dropLoot(enemy) {
+    // Gold, always — pirates carry fatter purses.
+    const gold = enemy.faction === "Pirate"
+      ? 25 + Math.floor(Math.random() * 40)
+      : 15 + Math.floor(Math.random() * 25);
+    this.loot.push(new Loot(enemy.x, enemy.y, "gold", gold));
+
+    // Plus one or two barrels of trade goods (cannons are a rare prize).
+    const barrels = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < barrels; i++) {
+      const type = Math.random() < 0.15
+        ? "cannons"
+        : ["food", "rum", "sugar"][Math.floor(Math.random() * 3)];
+      const amount = type === "cannons" ? 1 : 2 + Math.floor(Math.random() * 4);
+      this.loot.push(new Loot(enemy.x, enemy.y, type, amount));
+    }
+  }
+
+  /** Hull damage to the player: red flash, and at zero — the deep. */
+  _damagePlayer(dmg) {
+    this.ship.hull = Math.max(0, this.ship.hull - dmg);
+
+    // Re-trigger the CSS damage flash animation.
+    this.hud.damageFlash.classList.remove("flash");
+    void this.hud.damageFlash.offsetWidth; // reflow restarts the animation
+    this.hud.damageFlash.classList.add("flash");
+
+    if (this.ship.hull <= 0) this._triggerGameOver();
+  }
+
+  /** Freeze the world and raise the Game Over overlay. */
+  _triggerGameOver() {
+    if (this.gameOver) return;
+    this.gameOver = true;
+    this.paused = true; // reuse the docking pause seam: physics stops
+    if (this.portMenu.isOpen) this.portMenu.close();
+
+    this.hud.gameOverStats.textContent =
+      `You went down with ${Math.floor(this.state.gold)} gold aboard ` +
+      `and a crew of ${this.state.crew} souls.`;
+    this.hud.gameOver.classList.remove("hidden");
+    // Game over outranks the docking pause: stay frozen.
+    this.paused = true;
+  }
+
+  /** Spawn a fresh wanderer on a random map edge, away from the player. */
+  _spawnEnemy() {
+    const factions = ["Pirate", "Pirate", "Spanish", "English", "French"];
+    for (let attempt = 0; attempt < 8; attempt++) {
+      // A random point along a random edge of the map.
+      const edge = Math.floor(Math.random() * 4);
+      const along = 500 + Math.random() * (WORLD_WIDTH - 1000);
+      const x = edge === 0 ? 300 : edge === 1 ? WORLD_WIDTH - 300 : along;
+      const y = edge === 2 ? 300 : edge === 3 ? WORLD_HEIGHT - 300 : along;
+
+      // Not on land, and never right on top of the player.
+      if (Math.hypot(x - this.ship.x, y - this.ship.y) < 1200) continue;
+      let onLand = false;
+      for (const isle of this.world.islands) {
+        if (Math.hypot(x - isle.x, y - isle.y) < isle.r * 1.3) { onLand = true; break; }
+      }
+      if (onLand) continue;
+
+      this.enemies.push(
+        new EnemyShip({ x, y, faction: factions[Math.floor(Math.random() * factions.length)] })
+      );
+      return;
+    }
+  }
+
+  // =======================================================================
   // Land collision
   // =======================================================================
 
@@ -406,11 +676,11 @@ export class Engine {
    *    you dead on the beach; a glancing touch lets you slide along it
    *  - escaping is always possible — turn the bow seaward and sheet in
    */
-  _resolveLandCollisions() {
-    const ship = this.ship;
+  _resolveLandCollisions(ship) {
     // The ship's center keeps this much clearance from the waterline;
     // less than the bow length, so a grounded ship visibly noses onto
-    // the sand without the hull climbing the beach.
+    // the sand without the hull climbing the beach. Works for the
+    // player and AI ships alike (anything with x/y/angle/speed/length).
     const margin = ship.length * 0.38;
 
     // --- Islands ---------------------------------------------------------
@@ -424,7 +694,7 @@ export class Engine {
       if (dist > isle.r * 1.25 + margin) continue;
 
       const limit = this.world.coastRadius(i, Math.atan2(dy, dx)) + margin;
-      if (dist < limit) this._ground(dx, dy, dist, limit, isle.x, isle.y);
+      if (dist < limit) this._ground(ship, dx, dy, dist, limit, isle.x, isle.y);
     }
 
     // --- Rock stones -------------------------------------------------------
@@ -435,7 +705,7 @@ export class Engine {
         const dy = ship.y - stone.y;
         const dist = Math.hypot(dx, dy);
         const limit = stone.r + margin * 0.8;
-        if (dist < limit) this._ground(dx, dy, dist, limit, stone.x, stone.y);
+        if (dist < limit) this._ground(ship, dx, dy, dist, limit, stone.x, stone.y);
       }
     }
 
@@ -446,7 +716,7 @@ export class Engine {
       const dy = ship.y - lh.y;
       const dist = Math.hypot(dx, dy);
       const limit = 30 + margin * 0.8;
-      if (dist < limit) this._ground(dx, dy, dist, limit, lh.x, lh.y);
+      if (dist < limit) this._ground(ship, dx, dy, dist, limit, lh.x, lh.y);
     }
   }
 
@@ -459,8 +729,7 @@ export class Engine {
    * @param {number} limit   minimum allowed distance (waterline + margin)
    * @param {number} cx,cy   obstacle center
    */
-  _ground(dx, dy, dist, limit, cx, cy) {
-    const ship = this.ship;
+  _ground(ship, dx, dy, dist, limit, cx, cy) {
     const d = dist || 0.001; // degenerate case: dead-center overlap
 
     // Clamp the position out to the waterline.
@@ -579,7 +848,10 @@ export class Engine {
 
     this.world.draw(ctx, this.camera, { w: viewW, h: viewH }, time);
     for (const port of this.ports) port.draw(ctx);
+    for (const item of this.loot) item.draw(ctx, time);
+    for (const enemy of this.enemies) enemy.draw(ctx, time);
     this.ship.draw(ctx, time, this.state.wind);
+    for (const ball of this.cannonballs) ball.draw(ctx);
     this._drawWindStreaks(ctx);
 
     ctx.restore();
@@ -665,6 +937,12 @@ export class Engine {
 
     // Ship readouts. World units/s → "knots" with an arbitrary fun scale.
     this.hud.shipSpeed.textContent = `${(this.ship.speed / 18).toFixed(1)} kn`;
+
+    // Hull integrity, colored from healthy brass to alarm red.
+    const hullFrac = this.ship.hull / this.ship.maxHull;
+    this.hud.hull.textContent = Math.ceil(this.ship.hull);
+    this.hud.hull.style.color =
+      hullFrac > 0.6 ? "#7ec96a" : hullFrac > 0.3 ? "#e0b73f" : "#e0524f";
 
     // Human-friendly sail trim label.
     const trim = this.ship.sail;

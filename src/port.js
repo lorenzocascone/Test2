@@ -55,6 +55,11 @@ const FACTION_TRAITS = {
   },
 };
 
+/** Flag/badge color for a faction — shared with enemy ships and the map. */
+export function factionColor(faction) {
+  return FACTION_TRAITS[faction].color;
+}
+
 /** How often (seconds) a port re-rolls its price drift. */
 const PRICE_DRIFT_INTERVAL = 12;
 
