@@ -70,14 +70,16 @@ const TRADE_PRICE_IMPACT = 0.03;
 export class Port {
   /**
    * @param {object} opts
-   * @param {number} opts.x       world X of the dock
+   * @param {number} opts.x       world X of the dock (on the coastline)
    * @param {number} opts.y       world Y of the dock
+   * @param {number} opts.facing  direction the pier points, out to sea
    * @param {string} opts.name    display name, e.g. "Port Royal"
    * @param {string} opts.faction one of: Spanish, English, French, Pirate
    */
-  constructor({ x, y, name, faction }) {
+  constructor({ x, y, facing = 0, name, faction }) {
     this.x = x;
     this.y = y;
+    this.facing = facing;
     this.name = name;
     this.faction = faction;
 
@@ -191,38 +193,68 @@ export class Port {
     ctx.save();
     ctx.translate(this.x, this.y);
 
-    // --- Pier: a short wooden jetty sticking out into the water --------
-    ctx.fillStyle = "#7a5a36";
-    ctx.fillRect(-8, -30, 16, 60);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
-    for (let y = -24; y <= 24; y += 12) {
-      ctx.fillRect(-8, y, 16, 2); // plank seams
-    }
+    // Pier and flag rotate to point out to sea, away from the island —
+    // so the jetty always meets the beach it belongs to.
+    ctx.save();
+    ctx.rotate(this.facing);
 
-    // --- Flag pole + faction flag ---------------------------------------
+    // --- Pier: a wooden jetty running from the sand into the water ------
+    ctx.fillStyle = "#7a5a36";
+    ctx.fillRect(-14, -8, 58, 16); // starts a little inland, juts seaward
+    ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+    for (let px = -8; px <= 38; px += 9) {
+      ctx.fillRect(px, -8, 2, 16); // plank seams
+    }
+    // Mooring posts at the seaward end.
+    ctx.fillStyle = "#4a3320";
+    ctx.beginPath();
+    ctx.arc(42, -7, 2.5, 0, Math.PI * 2);
+    ctx.arc(42, 7, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // --- A little rowboat moored alongside ------------------------------
+    ctx.fillStyle = "#8a5a33";
+    ctx.strokeStyle = "#3a2718";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(22, 16, 9, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath();
+    ctx.moveTo(15, 16);
+    ctx.lineTo(29, 16); // thwart (the rower's bench)
+    ctx.stroke();
+
+    // --- Flag pole + faction flag at the landward end --------------------
     ctx.strokeStyle = "#3d2716";
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(0, -30);
-    ctx.lineTo(0, -62);
+    ctx.moveTo(-10, 0);
+    ctx.lineTo(-10, -30);
     ctx.stroke();
 
     ctx.fillStyle = this.color;
     ctx.beginPath();
-    ctx.moveTo(0, -62);
-    ctx.lineTo(26, -55);
-    ctx.lineTo(0, -48);
+    ctx.moveTo(-10, -30);
+    ctx.lineTo(14, -24);
+    ctx.lineTo(-10, -18);
     ctx.closePath();
     ctx.fill();
 
-    // --- Name label with a dark halo for readability over any terrain ---
+    ctx.restore(); // back to unrotated, port-centered space
+
+    // --- Name label: floated out over open water (along the pier's
+    // facing) so it never gets lost against the island detail ------------
+    const lx = Math.cos(this.facing) * 86;
+    const ly = Math.sin(this.facing) * 86;
     ctx.font = "17px 'Pirata One', 'Trebuchet MS', sans-serif";
     ctx.textAlign = "center";
     ctx.lineWidth = 4;
     ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
-    ctx.strokeText(this.name, 0, -72);
+    ctx.strokeText(this.name, lx, ly + 6);
     ctx.fillStyle = "#e8dcc0";
-    ctx.fillText(this.name, 0, -72);
+    ctx.fillText(this.name, lx, ly + 6);
 
     ctx.restore();
   }

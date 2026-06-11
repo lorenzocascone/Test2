@@ -205,26 +205,43 @@ export class Ship {
     this.y += Math.sin(this.angle) * this.speed * dt;
 
     // -----------------------------------------------------------------
-    // 5. Wake foam: spawn particles at the stern while underway; age
-    //    and cull the existing ones. Faster ship = denser foam.
+    // 5. Wake: churned-water streaks shed from BOTH quarters of the
+    //    stern with outward velocity, so the trail spreads into the
+    //    classic V behind the ship. Each particle is a little water
+    //    streak (drawn as a line along its drift direction), not a
+    //    puff — water, not smoke.
     // -----------------------------------------------------------------
     this._wakeTimer -= dt;
-    if (this.speed > 30 && this._wakeTimer <= 0) {
-      this._wakeTimer = 8 / this.speed; // spawn interval shrinks with speed
+    if (this.speed > 25 && this._wakeTimer <= 0) {
+      this._wakeTimer = 6 / this.speed; // denser trail at higher speed
       const sternX = this.x - Math.cos(this.angle) * (this.length / 2);
       const sternY = this.y - Math.sin(this.angle) * (this.length / 2);
-      // Slight lateral jitter so the trail isn't a sterile line.
-      const jitter = (Math.random() - 0.5) * this.width * 0.7;
-      this.wake.push({
-        x: sternX - Math.sin(this.angle) * jitter,
-        y: sternY + Math.cos(this.angle) * jitter,
-        life: 1,
-      });
-      if (this.wake.length > 70) this.wake.shift();
+      // Unit vector pointing to starboard (perpendicular to the keel).
+      const perpX = -Math.sin(this.angle);
+      const perpY = Math.cos(this.angle);
+
+      for (const side of [-1, 1]) {
+        // Outward + slightly backward drift, with a touch of randomness.
+        const lateral = side * (10 + this.speed * 0.1) * (0.7 + Math.random() * 0.6);
+        this.wake.push({
+          x: sternX + perpX * side * this.width * 0.35,
+          y: sternY + perpY * side * this.width * 0.35,
+          vx: perpX * lateral - Math.cos(this.angle) * this.speed * 0.05,
+          vy: perpY * lateral - Math.sin(this.angle) * this.speed * 0.05,
+          life: 1,
+        });
+      }
+      if (this.wake.length > 90) this.wake.splice(0, 2);
     }
     for (let i = this.wake.length - 1; i >= 0; i--) {
-      this.wake[i].life -= dt * 0.65;
-      if (this.wake[i].life <= 0) this.wake.splice(i, 1);
+      const p = this.wake[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      // Water drag: the spreading slows as the streak dissipates.
+      p.vx -= p.vx * 1.6 * dt;
+      p.vy -= p.vy * 1.6 * dt;
+      p.life -= dt * 0.8;
+      if (p.life <= 0) this.wake.splice(i, 1);
     }
   }
 
@@ -240,21 +257,45 @@ export class Ship {
     const L = this.length;
     const W = this.width;
 
-    // --- Wake foam first, in world space, under everything --------------
+    // --- Wake first, in world space, under everything --------------------
+    // Each particle renders as a short streak along its drift direction;
+    // together the two shed lines spread into a turbulent V.
+    ctx.lineCap = "round";
     for (const p of this.wake) {
-      // Foam blobs grow and fade as they age.
-      const age = 1 - p.life;
-      ctx.globalAlpha = p.life * 0.45;
-      ctx.fillStyle = "#dff3ff";
+      const drift = Math.hypot(p.vx, p.vy) || 1;
+      const len = 3 + (1 - p.life) * 9; // streaks stretch as they dissipate
+      const nx = (p.vx / drift) * len;
+      const ny = (p.vy / drift) * len;
+
+      ctx.globalAlpha = p.life * 0.55;
+      ctx.strokeStyle = "#dff3ff";
+      ctx.lineWidth = 1.5 + p.life * 1.5; // fat near the ship, thin far out
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.5 + age * 7, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.moveTo(p.x - nx, p.y - ny);
+      ctx.lineTo(p.x + nx, p.y + ny);
+      ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
+
+    // --- Stern churn: boiling white water right behind the transom -------
+    if (this.speed > 20) {
+      const churn = this.speed / MAX_SPEED;
+      ctx.fillStyle = "#e8f7ff";
+      for (let i = 0; i < 3; i++) {
+        // Three jittering froth blobs that overlap into a roiling patch.
+        const jx = Math.sin(time * 11 + i * 2.1) * 2.5;
+        const jy = Math.cos(time * 13 + i * 1.7) * (W * 0.18);
+        ctx.globalAlpha = 0.3 * churn;
+        ctx.beginPath();
+        ctx.ellipse(-L / 2 - 4 + jx, jy, 7 * churn + 2, 4 * churn + 1.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
 
     // Gentle idle bob: a touch of lateral sway and roll, purely visual.
     ctx.translate(0, Math.sin(time * 1.8) * 1.3);

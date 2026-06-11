@@ -57,6 +57,13 @@ function mulberry32(seed) {
   };
 }
 
+/** Darken a #rrggbb color by ~22% — used for the shaded roof half. */
+function shade(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.max(0, Math.round(v * 0.78));
+  return `rgb(${f(n >> 16)}, ${f((n >> 8) & 255)}, ${f(n & 255)})`;
+}
+
 /**
  * Generate a wobbly closed coastline around (cx, cy): N points whose
  * radius varies randomly. Drawn with smoothing, this reads as a natural
@@ -115,7 +122,7 @@ export class WorldRenderer {
           size: 10 + rand() * 8,
         });
       }
-      return { ...isle, pts: makeBlob(isle.x, isle.y, isle.r, isle.seed), palms };
+      return { ...isle, pts: makeBlob(isle.x, isle.y, isle.r, isle.seed), palms, town: null };
     });
 
     // Rock clusters: 3-5 jagged little blobs each.
@@ -132,6 +139,79 @@ export class WorldRenderer {
       }
       return { ...rock, stones };
     });
+  }
+
+  /**
+   * The actual coastline radius of an island in a given direction,
+   * interpolated between the blob's noise points. Ports use this to sit
+   * exactly on the generated coast instead of the nominal circle.
+   *
+   * @param {number} islandIndex index into this.islands
+   * @param {number} angle       direction from the island center (radians)
+   * @param {number} scale       1 = waterline; >1 pushes out to sea
+   * @returns {{x:number, y:number}} world position on/off that coast
+   */
+  coastPoint(islandIndex, angle, scale = 1) {
+    const isle = this.islands[islandIndex];
+    const n = isle.pts.length;
+
+    // Blob points sit at evenly spaced angles; find the two flanking
+    // `angle` and lerp their radii.
+    const norm = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const t = (norm / (Math.PI * 2)) * n;
+    const i0 = Math.floor(t) % n;
+    const i1 = (i0 + 1) % n;
+    const frac = t - Math.floor(t);
+
+    const radiusOf = (p) => Math.hypot(p.x - isle.x, p.y - isle.y);
+    const radius = radiusOf(isle.pts[i0]) * (1 - frac) + radiusOf(isle.pts[i1]) * frac;
+
+    return {
+      x: isle.x + Math.cos(angle) * radius * scale,
+      y: isle.y + Math.sin(angle) * radius * scale,
+    };
+  }
+
+  /**
+   * Found a town on an island, inland of the pier at `coastAngle`:
+   * a seeded cluster of gable-roofed houses, a dirt path down to the
+   * dock, and a chimney that puffs smoke. Called by the engine for each
+   * island that hosts a port — ports have to come from somewhere.
+   *
+   * @param {number} islandIndex which island gets the settlement
+   * @param {number} coastAngle  direction from island center to the pier
+   * @param {{x:number,y:number}} pier world position of the pier base
+   */
+  addSettlement(islandIndex, coastAngle, pier) {
+    const isle = this.islands[islandIndex];
+    const rand = mulberry32(isle.seed * 131 + 7);
+
+    // Town center: pulled inland from the pier, past the beach.
+    const inland = this.coastPoint(islandIndex, coastAngle, 0.55);
+
+    // Houses scatter around the center, loosely facing the harbor.
+    const houses = [];
+    const count = 5 + Math.floor(rand() * 4);
+    const roofColors = ["#b3502e", "#a8452a", "#c9a55a", "#8f6b3d"];
+    for (let i = 0; i < count; i++) {
+      const a = rand() * Math.PI * 2;
+      const d = rand() * isle.r * 0.28;
+      houses.push({
+        x: inland.x + Math.cos(a) * d,
+        y: inland.y + Math.sin(a) * d * 0.8,
+        w: 9 + rand() * 6,
+        h: 7 + rand() * 4,
+        rot: coastAngle + (rand() - 0.5) * 0.7,
+        roof: roofColors[Math.floor(rand() * roofColors.length)],
+      });
+    }
+
+    // Clear any palms that landed inside the village footprint.
+    isle.palms = isle.palms.filter(
+      (p) => Math.hypot(p.x - inland.x, p.y - inland.y) > isle.r * 0.34
+    );
+
+    isle.town = { center: inland, pier, houses };
   }
 
   /**
@@ -282,6 +362,63 @@ export class WorldRenderer {
     for (const palm of isle.palms) {
       this._drawPalm(ctx, palm, time);
     }
+
+    // The harbor town, if this island has one.
+    if (isle.town) this._drawTown(ctx, isle.town, time);
+  }
+
+  /** Houses, the path to the dock, and a smoking chimney. */
+  _drawTown(ctx, town, time) {
+    // Dirt path: a gentle curve from the village square to the pier.
+    const midX = (town.center.x + town.pier.x) / 2 + 12;
+    const midY = (town.center.y + town.pier.y) / 2 - 8;
+    ctx.strokeStyle = "rgba(216, 192, 137, 0.85)";
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(town.center.x, town.center.y);
+    ctx.quadraticCurveTo(midX, midY, town.pier.x, town.pier.y);
+    ctx.stroke();
+
+    // Houses: top-down gabled roofs — two tones split along the ridge.
+    for (const house of town.houses) {
+      ctx.save();
+      ctx.translate(house.x, house.y);
+      ctx.rotate(house.rot);
+
+      // Drop shadow grounds the building.
+      ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+      ctx.fillRect(-house.w / 2 + 1.5, -house.h / 2 + 1.5, house.w, house.h);
+
+      // Sunlit roof half / shaded roof half.
+      ctx.fillStyle = house.roof;
+      ctx.fillRect(-house.w / 2, -house.h / 2, house.w, house.h / 2);
+      ctx.fillStyle = shade(house.roof);
+      ctx.fillRect(-house.w / 2, 0, house.w, house.h / 2);
+
+      // Ridge line.
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-house.w / 2, 0);
+      ctx.lineTo(house.w / 2, 0);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // Chimney smoke from the first (largest-ish) house: three puffs on a
+    // looping cycle, drifting up-left and fading as they grow.
+    const h0 = town.houses[0];
+    ctx.fillStyle = "#cfd8dd";
+    for (let k = 0; k < 3; k++) {
+      const t = (time * 0.35 + k / 3) % 1;
+      ctx.globalAlpha = (1 - t) * 0.3;
+      ctx.beginPath();
+      ctx.arc(h0.x - t * 14, h0.y - 4 - t * 18, 2 + t * 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
 
   _drawPalm(ctx, palm, time) {

@@ -114,18 +114,32 @@ export class Engine {
     this.world = new WorldRenderer();
 
     // -----------------------------------------------------------------
-    // Ports — each anchored to an island coast, spread across the map
-    // so trade routes mean real sailing. Seven harbors, four factions.
+    // Ports — defined by WHICH island and WHICH stretch of coast, then
+    // snapped onto the procedurally generated coastline so the pier
+    // always meets its beach. Founding a port also founds its town
+    // (houses, dock path, chimney smoke) on the island behind it.
     // -----------------------------------------------------------------
-    this.ports = [
-      new Port({ x: 1200, y: 1110, name: "Santo Domingo", faction: "Spanish" }),
-      new Port({ x: 2700, y: 820, name: "Havana", faction: "Spanish" }),
-      new Port({ x: 4400, y: 1690, name: "Port Royal", faction: "English" }),
-      new Port({ x: 5400, y: 2810, name: "Nassau", faction: "Pirate" }),
-      new Port({ x: 2300, y: 3390, name: "Petit-Goave", faction: "French" }),
-      new Port({ x: 5100, y: 4450, name: "Martinique", faction: "French" }),
-      new Port({ x: 800, y: 4680, name: "Tortuga", faction: "Pirate" }),
+    const portDefs = [
+      { island: 0, angle: Math.PI / 2, name: "Santo Domingo", faction: "Spanish" },
+      { island: 1, angle: Math.PI / 2, name: "Havana", faction: "Spanish" },
+      { island: 2, angle: Math.PI * 0.6, name: "Port Royal", faction: "English" },
+      { island: 3, angle: -Math.PI / 2, name: "Nassau", faction: "Pirate" },
+      { island: 4, angle: -Math.PI / 2, name: "Petit-Goave", faction: "French" },
+      { island: 5, angle: -Math.PI * 0.55, name: "Martinique", faction: "French" },
+      { island: 6, angle: -Math.PI / 2, name: "Tortuga", faction: "Pirate" },
     ];
+    this.ports = portDefs.map((def) => {
+      // Anchor the pier base right at the waterline of the real coast.
+      const anchor = this.world.coastPoint(def.island, def.angle, 1.0);
+      this.world.addSettlement(def.island, def.angle, anchor);
+      return new Port({
+        x: anchor.x,
+        y: anchor.y,
+        facing: def.angle, // pier points out to sea
+        name: def.name,
+        faction: def.faction,
+      });
+    });
 
     // The docked-at-port UI (tabs, trading, recruiting). It toggles
     // this.paused when opened/closed.
