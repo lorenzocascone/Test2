@@ -124,3 +124,97 @@ body {
   font-size: 11px;
   opacity: 0.55;
 }
+
+/* --------------------------------------------------------------------------
+   Touch controls — two button clusters anchored to the bottom corners,
+   sized for thumbs. Hidden entirely on devices with a fine pointer
+   (mouse/trackpad); shown only where the primary pointer is coarse (touch).
+   -------------------------------------------------------------------------- */
+#touch-controls {
+  display: none; /* desktop default; the media query below re-enables it */
+}
+
+.touch-cluster {
+  position: absolute;
+  bottom: calc(20px + env(safe-area-inset-bottom)); /* clear iPhone home bar */
+  display: flex;
+  gap: 14px;
+  pointer-events: none; /* the buttons re-enable; gaps stay click-through */
+}
+
+#touch-steer {
+  left: calc(16px + env(safe-area-inset-left));
+}
+
+#touch-sails {
+  right: calc(16px + env(safe-area-inset-right));
+}
+
+.touch-btn {
+  pointer-events: auto;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid rgba(232, 220, 192, 0.5);
+  background: rgba(20, 30, 40, 0.6);
+  color: #e8dcc0;
+  font-size: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* touch-action: none is essential — without it the browser interprets
+     a held thumb as a scroll/zoom gesture and cancels our pointer events */
+  touch-action: none;
+  -webkit-touch-callout: none; /* no iOS long-press callout */
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* Pressed feedback; the .active class is toggled from JS on pointerdown
+   so it tracks the real input state, not just CSS :active heuristics. */
+.touch-btn.active {
+  background: rgba(127, 212, 255, 0.35);
+  border-color: #7fd4ff;
+  transform: scale(0.94);
+}
+
+.touch-btn-glyph {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.touch-btn-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+/* Only devices whose primary input is touch get the on-screen controls.
+   This catches phones/tablets while leaving laptops with touchscreens
+   (fine trackpad as primary pointer) uncluttered. */
+@media (pointer: coarse) {
+  #touch-controls {
+    display: block;
+  }
+
+  /* The keyboard hint is meaningless on touch devices */
+  #controls-hint {
+    display: none;
+  }
+
+  /* Lift the ship panel above the thumb clusters so nothing overlaps
+     on narrow portrait screens. */
+  #ship-panel {
+    bottom: calc(110px + env(safe-area-inset-bottom));
+    min-width: 0;
+    padding: 8px 12px;
+  }
+
+  /* Slightly tighter HUD on small screens */
+  .panel {
+    padding: 8px 10px;
+  }
+}

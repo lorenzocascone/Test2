@@ -79,6 +79,7 @@ export class Engine {
     // -----------------------------------------------------------------
     this.input = { up: false, down: false, left: false, right: false };
     this._bindInput();
+    this._bindTouchControls();
 
     // -----------------------------------------------------------------
     // Decorative islands — fixed positions so the map feels consistent.
@@ -146,6 +147,48 @@ export class Engine {
     window.addEventListener("blur", () => {
       this.input.up = this.input.down = this.input.left = this.input.right = false;
     });
+  }
+
+  /**
+   * Wire the on-screen touch buttons (mobile) into the same logical input
+   * map the keyboard uses. Each button's data-action attribute names the
+   * input flag it drives ("up", "down", "left", "right").
+   *
+   * Pointer events (rather than touch events) give us mouse compatibility
+   * for free, and each finger gets its own pointer stream — so steering
+   * with the left thumb while trimming sails with the right "just works".
+   */
+  _bindTouchControls() {
+    const buttons = document.querySelectorAll(".touch-btn");
+
+    for (const btn of buttons) {
+      const action = btn.dataset.action;
+
+      const press = (e) => {
+        // preventDefault stops the browser from also synthesizing mouse
+        // events, scrolling, or showing selection UI for this touch.
+        e.preventDefault();
+        this.input[action] = true;
+        btn.classList.add("active");
+      };
+
+      const release = (e) => {
+        e.preventDefault();
+        this.input[action] = false;
+        btn.classList.remove("active");
+      };
+
+      btn.addEventListener("pointerdown", press);
+      btn.addEventListener("pointerup", release);
+      // pointercancel: the OS stole the gesture (e.g. notification shade).
+      // pointerleave: the finger slid off the button while held.
+      // Both must release the input or it would stick "on" forever.
+      btn.addEventListener("pointercancel", release);
+      btn.addEventListener("pointerleave", release);
+
+      // No long-press context menu on the controls.
+      btn.addEventListener("contextmenu", (e) => e.preventDefault());
+    }
   }
 
   // =======================================================================

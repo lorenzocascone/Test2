@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- user-scalable=no + maximum-scale stop pinch/double-tap zoom from
+       fighting the touch controls; viewport-fit=cover fills notched phones -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Corsair — A Top-Down Sailing Game</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -59,6 +61,29 @@
       </div>
       <div id="controls-hint">
         W/&#8593; raise sails &middot; S/&#8595; lower sails &middot; A/D or &#8592;/&#8594; steer
+      </div>
+    </div>
+
+    <!-- On-screen touch controls for mobile. Hidden on mouse/keyboard
+         devices via CSS (@media pointer: coarse). Each button carries a
+         data-action matching the engine's logical input names, so touch
+         and keyboard drive exactly the same input state. -->
+    <div id="touch-controls">
+      <!-- Left thumb: steering -->
+      <div class="touch-cluster" id="touch-steer">
+        <button class="touch-btn" data-action="left" aria-label="Steer left">&#10094;</button>
+        <button class="touch-btn" data-action="right" aria-label="Steer right">&#10095;</button>
+      </div>
+      <!-- Right thumb: sail trim -->
+      <div class="touch-cluster" id="touch-sails">
+        <button class="touch-btn" data-action="up" aria-label="Raise sails">
+          <span class="touch-btn-glyph">&#9650;</span>
+          <span class="touch-btn-label">Sail</span>
+        </button>
+        <button class="touch-btn" data-action="down" aria-label="Lower sails">
+          <span class="touch-btn-glyph">&#9660;</span>
+          <span class="touch-btn-label">Sail</span>
+        </button>
       </div>
     </div>
 
