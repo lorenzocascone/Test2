@@ -6,6 +6,10 @@
        fighting the touch controls; viewport-fit=cover fills notched phones -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Corsair — A Top-Down Sailing Game</title>
+  <!-- Pirate display font for titles & the chart; falls back gracefully -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Pirata+One&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -49,6 +53,9 @@
       </div>
     </div>
 
+    <!-- Map toggle button, tucked under the wind panel -->
+    <button id="map-toggle">&#128506; Chart <kbd>M</kbd></button>
+
     <!-- Bottom-center: ship status (speed + sail trim + cargo) -->
     <div id="ship-panel" class="panel">
       <div class="stat">
@@ -64,7 +71,7 @@
         <span class="stat-value" id="stat-cargo">0/0</span>
       </div>
       <div id="controls-hint">
-        W/&#8593; raise sails &middot; S/&#8595; lower sails &middot; A/D or &#8592;/&#8594; steer &middot; E dock
+        W/&#8593; raise sails &middot; S/&#8595; lower sails &middot; A/D or &#8592;/&#8594; steer &middot; E dock &middot; M chart
       </div>
     </div>
 
@@ -88,6 +95,19 @@
           <span class="touch-btn-glyph">&#9660;</span>
           <span class="touch-btn-label">Sail</span>
         </button>
+      </div>
+    </div>
+
+    <!-- ==================================================================
+         Pirate map — an unfurlable parchment scroll showing the whole
+         world and the player's live position. CSS animates the unfurl
+         (scaleY on the scroll); map.js draws the chart onto the canvas.
+         ================================================================== -->
+    <div id="pirate-map" class="hidden">
+      <div id="pirate-map-scroll">
+        <div class="scroll-rod scroll-rod-top"></div>
+        <canvas id="map-canvas" width="520" height="520"></canvas>
+        <div class="scroll-rod scroll-rod-bottom"></div>
       </div>
     </div>
 

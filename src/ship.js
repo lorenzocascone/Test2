@@ -89,6 +89,11 @@ export class Ship {
     // --- Cosmetic ---------------------------------------------------------
     this.length = 48; // used by the renderer for the hull size
     this.width = 20;
+
+    // Wake foam particles: {x, y, life} in world coordinates, spawned at
+    // the stern while moving and faded out over ~1.5 seconds.
+    this.wake = [];
+    this._wakeTimer = 0;
   }
 
   /**
@@ -198,6 +203,29 @@ export class Ship {
     // -----------------------------------------------------------------
     this.x += Math.cos(this.angle) * this.speed * dt;
     this.y += Math.sin(this.angle) * this.speed * dt;
+
+    // -----------------------------------------------------------------
+    // 5. Wake foam: spawn particles at the stern while underway; age
+    //    and cull the existing ones. Faster ship = denser foam.
+    // -----------------------------------------------------------------
+    this._wakeTimer -= dt;
+    if (this.speed > 30 && this._wakeTimer <= 0) {
+      this._wakeTimer = 8 / this.speed; // spawn interval shrinks with speed
+      const sternX = this.x - Math.cos(this.angle) * (this.length / 2);
+      const sternY = this.y - Math.sin(this.angle) * (this.length / 2);
+      // Slight lateral jitter so the trail isn't a sterile line.
+      const jitter = (Math.random() - 0.5) * this.width * 0.7;
+      this.wake.push({
+        x: sternX - Math.sin(this.angle) * jitter,
+        y: sternY + Math.cos(this.angle) * jitter,
+        life: 1,
+      });
+      if (this.wake.length > 70) this.wake.shift();
+    }
+    for (let i = this.wake.length - 1; i >= 0; i--) {
+      this.wake[i].life -= dt * 0.65;
+      if (this.wake[i].life <= 0) this.wake.splice(i, 1);
+    }
   }
 
   /**
@@ -205,69 +233,148 @@ export class Ship {
    * by the camera, so we draw in world coordinates.
    *
    * @param {CanvasRenderingContext2D} ctx
+   * @param {number} time - seconds, for bobbing/flag animation
+   * @param {{angle:number, speed:number}} wind - so the pennant can stream
    */
-  draw(ctx) {
+  draw(ctx, time, wind) {
+    const L = this.length;
+    const W = this.width;
+
+    // --- Wake foam first, in world space, under everything --------------
+    for (const p of this.wake) {
+      // Foam blobs grow and fade as they age.
+      const age = 1 - p.life;
+      ctx.globalAlpha = p.life * 0.45;
+      ctx.fillStyle = "#dff3ff";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.5 + age * 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
 
-    const L = this.length;
-    const W = this.width;
+    // Gentle idle bob: a touch of lateral sway and roll, purely visual.
+    ctx.translate(0, Math.sin(time * 1.8) * 1.3);
+    ctx.rotate(Math.sin(time * 1.4) * 0.015);
 
-    // --- Wake: two faint trailing lines, longer the faster we go --------
-    if (this.speed > 5) {
-      const wakeLen = (this.speed / MAX_SPEED) * 70;
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-L / 2, -W / 3);
-      ctx.lineTo(-L / 2 - wakeLen, -W / 2);
-      ctx.moveTo(-L / 2, W / 3);
-      ctx.lineTo(-L / 2 - wakeLen, W / 2);
-      ctx.stroke();
-    }
+    // --- Hull shadow in the water ----------------------------------------
+    ctx.fillStyle = "rgba(0, 10, 20, 0.25)";
+    ctx.beginPath();
+    ctx.ellipse(-2, 3, L * 0.55, W * 0.62, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-    // --- Hull: a pointed-bow polygon ------------------------------------
-    ctx.fillStyle = "#6b4226"; // weathered timber
-    ctx.strokeStyle = "#3d2716";
-    ctx.lineWidth = 2;
+    // --- Hull: planked timber with a lit port side ------------------------
+    const hullGrad = ctx.createLinearGradient(0, -W / 2, 0, W / 2);
+    hullGrad.addColorStop(0, "#8a5a33");
+    hullGrad.addColorStop(0.5, "#6b4226");
+    hullGrad.addColorStop(1, "#4e3019");
+    ctx.fillStyle = hullGrad;
+    ctx.strokeStyle = "#2e1d10";
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(L / 2, 0);            // bow tip
-    ctx.lineTo(L / 6, -W / 2);       // starboard shoulder
-    ctx.lineTo(-L / 2, -W / 2.6);    // starboard quarter
-    ctx.lineTo(-L / 2, W / 2.6);     // port quarter
-    ctx.lineTo(L / 6, W / 2);        // port shoulder
+    ctx.quadraticCurveTo(L / 3, -W / 2, L / 8, -W / 2);   // starboard bow curve
+    ctx.lineTo(-L / 2 + 6, -W / 2.4);                     // starboard side
+    ctx.quadraticCurveTo(-L / 2, -W / 4, -L / 2, 0);      // rounded stern
+    ctx.quadraticCurveTo(-L / 2, W / 4, -L / 2 + 6, W / 2.4);
+    ctx.lineTo(L / 8, W / 2);                             // port side
+    ctx.quadraticCurveTo(L / 3, W / 2, L / 2, 0);         // port bow curve
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // --- Deck line for a bit of detail -----------------------------------
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.3)";
+    // --- Deck planks --------------------------------------------------------
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.22)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(L / 2 - 6, 0);
-    ctx.lineTo(-L / 2 + 4, 0);
+    for (const off of [-W / 5, 0, W / 5]) {
+      ctx.moveTo(L / 2 - 8, off * 0.4);
+      ctx.lineTo(-L / 2 + 5, off);
+    }
     ctx.stroke();
 
-    // --- Sail: a billowing arc whose size reflects the trim level --------
+    // --- Cannon ports: three black squares along each gunwale --------------
+    ctx.fillStyle = "#1c120a";
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const cx = L / 6 - i * (L / 4.2);
+        ctx.fillRect(cx - 2, side * (W / 2) * 0.82 - 2, 4, 4);
+      }
+    }
+
+    // --- Stern castle: the raised quarterdeck at the back -------------------
+    ctx.fillStyle = "#7a4e2a";
+    ctx.strokeStyle = "#2e1d10";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.rect(-L / 2 + 4, -W / 3.2, L / 5, (W / 3.2) * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // --- Bowsprit: the spar jutting forward off the bow ----------------------
+    ctx.strokeStyle = "#3a2718";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(L / 2 - 2, 0);
+    ctx.lineTo(L / 2 + 13, 0);
+    ctx.stroke();
+
+    // --- Sails: two square sails that billow with the trim level -------------
+    // Drawn top-down as curved sheets perpendicular to the keel.
     if (this.sail > 0.02) {
-      const sailH = (W * 1.6) * this.sail; // canvas spread scales with trim
-      ctx.fillStyle = "rgba(245, 240, 225, 0.95)";
-      ctx.strokeStyle = "#999";
-      ctx.lineWidth = 1;
+      const masts = [
+        { x: L * 0.14, span: W * 1.9 },  // main mast — the big one
+        { x: -L * 0.22, span: W * 1.4 }, // mizzen — smaller, astern
+      ];
+      for (const mast of masts) {
+        const half = (mast.span * this.sail) / 2;
+        // Belly of the sail bows backward; a hint of flutter when slack.
+        const belly = L / 3.4 * this.sail + Math.sin(time * 6 + mast.x) * (1 - this.sail) * 2;
+
+        const sailGrad = ctx.createLinearGradient(mast.x, 0, mast.x - belly, 0);
+        sailGrad.addColorStop(0, "#f7f2e3");
+        sailGrad.addColorStop(1, "#d9d0b8");
+        ctx.fillStyle = sailGrad;
+        ctx.strokeStyle = "#8d8470";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(mast.x, -half);
+        ctx.quadraticCurveTo(mast.x - belly, 0, mast.x, half);
+        // Yard (the cross spar): a straight line closing the shape.
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // --- Masts (dots from above) ----------------------------------------------
+    ctx.fillStyle = "#2e1d10";
+    for (const mx of [L * 0.14, -L * 0.22]) {
       ctx.beginPath();
-      ctx.moveTo(2, -sailH / 2);
-      // The quadratic control point bows the sail backward, as if filled.
-      ctx.quadraticCurveTo(-L / 3, 0, 2, sailH / 2);
+      ctx.arc(mx, 0, 2.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // --- Pennant: a red ribbon streaming downwind from the main mast ----------
+    if (wind) {
+      // Convert the global wind direction into the ship's local frame.
+      const localWind = wind.angle - this.angle;
+      ctx.save();
+      ctx.translate(L * 0.14, 0);
+      ctx.rotate(localWind);
+      const wave = Math.sin(time * 7) * 2.5;
+      ctx.fillStyle = "#c8414f";
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(9, wave, 18, wave * 0.6);
+      ctx.lineTo(12, wave * 0.6 + 3);
+      ctx.quadraticCurveTo(7, wave + 3, 0, 3);
       ctx.closePath();
       ctx.fill();
-      ctx.stroke();
-
-      // Mast dot
-      ctx.fillStyle = "#3d2716";
-      ctx.beginPath();
-      ctx.arc(2, 0, 2.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.restore();
     }
 
     ctx.restore();

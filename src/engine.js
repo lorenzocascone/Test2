@@ -13,18 +13,19 @@
 import { Ship } from "./ship.js";
 import { Port, GOODS } from "./port.js";
 import { PortMenu } from "./portMenu.js";
+import { WORLD, WorldRenderer } from "./world.js";
+import { PirateMap } from "./map.js";
 
 // ---------------------------------------------------------------------------
 // World tuning
 // ---------------------------------------------------------------------------
 
-/** World dimensions in world units — deliberately much larger than any
- *  screen so the camera has room to roam. */
-const WORLD_WIDTH = 6000;
-const WORLD_HEIGHT = 6000;
+/** World dimensions come from world.js (the single source of geography). */
+const WORLD_WIDTH = WORLD.width;
+const WORLD_HEIGHT = WORLD.height;
 
-/** Spacing of the faint ocean grid that gives a sense of movement. */
-const OCEAN_GRID = 200;
+/** Number of drifting wind-streak particles visualizing the breeze. */
+const WIND_STREAK_COUNT = 30;
 
 /** How quickly the camera eases toward the ship (1/s). Lower = floatier. */
 const CAMERA_LERP = 3.0;
@@ -80,8 +81,10 @@ export class Engine {
       },
     };
 
-    // The player's ship starts in the middle of the world.
-    this.ship = new Ship(WORLD_WIDTH / 2, WORLD_HEIGHT / 2);
+    // The player's ship starts just off Santo Domingo, so the very first
+    // port is in sight — no more being lost at sea on frame one.
+    this.ship = new Ship(1650, 1350);
+    this.ship.angle = Math.PI * 0.9; // pointed roughly at the harbor
 
     // -----------------------------------------------------------------
     // Pause flag — set/cleared by the port menu. While true, update()
@@ -105,25 +108,21 @@ export class Engine {
     this._bindTouchControls();
 
     // -----------------------------------------------------------------
-    // Decorative islands — fixed positions so the map feels consistent.
-    // Each entry: x, y, radius. (Collision can be layered on later.)
+    // World geography & environment renderer (islands, landmarks,
+    // animated water) — see world.js. Precomputes all coastlines once.
     // -----------------------------------------------------------------
-    this.islands = [
-      { x: 1200, y: 900, r: 180 },
-      { x: 4400, y: 1400, r: 260 },
-      { x: 2300, y: 3600, r: 140 },
-      { x: 5100, y: 4700, r: 220 },
-      { x: 800, y: 4900, r: 190 },
-      { x: 3500, y: 2200, r: 100 },
-    ];
+    this.world = new WorldRenderer();
 
     // -----------------------------------------------------------------
-    // Ports — each anchored to the coast of one of the islands above,
-    // spread across the map so trade routes mean real sailing.
+    // Ports — each anchored to an island coast, spread across the map
+    // so trade routes mean real sailing. Seven harbors, four factions.
     // -----------------------------------------------------------------
     this.ports = [
       new Port({ x: 1200, y: 1110, name: "Santo Domingo", faction: "Spanish" }),
+      new Port({ x: 2700, y: 820, name: "Havana", faction: "Spanish" }),
       new Port({ x: 4400, y: 1690, name: "Port Royal", faction: "English" }),
+      new Port({ x: 5400, y: 2810, name: "Nassau", faction: "Pirate" }),
+      new Port({ x: 2300, y: 3390, name: "Petit-Goave", faction: "French" }),
       new Port({ x: 5100, y: 4450, name: "Martinique", faction: "French" }),
       new Port({ x: 800, y: 4680, name: "Tortuga", faction: "Pirate" }),
     ];
@@ -131,6 +130,19 @@ export class Engine {
     // The docked-at-port UI (tabs, trading, recruiting). It toggles
     // this.paused when opened/closed.
     this.portMenu = new PortMenu(this);
+
+    // The unfurlable parchment chart (M key or the map button).
+    this.pirateMap = new PirateMap(this);
+
+    // -----------------------------------------------------------------
+    // Wind streaks: faint lines drifting with the wind so you can read
+    // the breeze at a glance without checking the HUD. Spawned lazily
+    // into the current viewport, recycled when they drift out.
+    // -----------------------------------------------------------------
+    this.streaks = [];
+    for (let i = 0; i < WIND_STREAK_COUNT; i++) {
+      this.streaks.push({ x: 0, y: 0, dead: true });
+    }
 
     // Cache HUD elements once — querying the DOM every frame is wasteful.
     this.hud = {
@@ -183,8 +195,14 @@ export class Engine {
       // E docks at a nearby port (or leaves, if already docked).
       if (e.code === "KeyE") this._tryDock();
 
-      // Escape always leaves port.
-      if (e.code === "Escape" && this.portMenu.isOpen) this.portMenu.close();
+      // M unfurls/furls the pirate map.
+      if (e.code === "KeyM") this.pirateMap.toggle();
+
+      // Escape closes whatever's open: port first, then the map.
+      if (e.code === "Escape") {
+        if (this.portMenu.isOpen) this.portMenu.close();
+        else if (this.pirateMap.isOpen) this.pirateMap.close();
+      }
     });
 
     window.addEventListener("keyup", (e) => {
@@ -322,9 +340,36 @@ export class Engine {
       this.state.cargo.food - this.state.crew * FOOD_PER_CREW_PER_SEC * dt
     );
 
+    this._updateWindStreaks(dt);
     this._centerCameraOnShip(false, dt);
     this._updateDockPrompt();
     this._updateHud();
+  }
+
+  /**
+   * Move the wind-streak particles with the breeze; recycle any that
+   * leave the viewport by respawning them at a random spot inside it.
+   */
+  _updateWindStreaks(dt) {
+    const w = this.state.wind;
+    const vx = Math.cos(w.angle) * (50 + w.speed * 9);
+    const vy = Math.sin(w.angle) * (50 + w.speed * 9);
+    const margin = 60;
+
+    for (const s of this.streaks) {
+      s.x += vx * dt;
+      s.y += vy * dt;
+
+      const off =
+        s.dead ||
+        s.x < this.camera.x - margin || s.x > this.camera.x + this.canvas.width + margin ||
+        s.y < this.camera.y - margin || s.y > this.camera.y + this.canvas.height + margin;
+      if (off) {
+        s.x = this.camera.x + Math.random() * this.canvas.width;
+        s.y = this.camera.y + Math.random() * this.canvas.height;
+        s.dead = false;
+      }
+    }
   }
 
   /** Show/hide the "Dock at ..." prompt depending on proximity. */
@@ -398,14 +443,21 @@ export class Engine {
   // Rendering
   // =======================================================================
 
-  /** Draw the entire frame: ocean, islands, ship. */
+  /** Draw the entire frame: sea, world, ports, ship, light, map. */
   render() {
     const ctx = this.ctx;
     const viewW = this.canvas.width;
     const viewH = this.canvas.height;
 
-    // --- Ocean base color (screen space, no translation needed) ---------
-    ctx.fillStyle = "#1a4a6e";
+    // Visual clock — runs even while docked, so water keeps shimmering
+    // behind the port menu (only PHYSICS pauses, not ambience).
+    const time = performance.now() / 1000;
+
+    // --- Deep-sea gradient base (screen space) ---------------------------
+    const sea = ctx.createLinearGradient(0, 0, 0, viewH);
+    sea.addColorStop(0, "#1f5b80");
+    sea.addColorStop(1, "#143a55");
+    ctx.fillStyle = sea;
     ctx.fillRect(0, 0, viewW, viewH);
 
     // Everything below is drawn in WORLD coordinates: translate the
@@ -413,72 +465,63 @@ export class Engine {
     ctx.save();
     ctx.translate(-this.camera.x, -this.camera.y);
 
-    this._drawOceanGrid(ctx, viewW, viewH);
-    this._drawWorldBorder(ctx);
-    this._drawIslands(ctx);
+    this.world.draw(ctx, this.camera, { w: viewW, h: viewH }, time);
     for (const port of this.ports) port.draw(ctx);
-    this.ship.draw(ctx);
+    this.ship.draw(ctx, time, this.state.wind);
+    this._drawWindStreaks(ctx);
 
     ctx.restore();
+
+    // --- Screen-space lighting: sun glow + vignette ----------------------
+    this._drawLighting(ctx, viewW, viewH);
+
+    // --- The pirate map redraws live while unfurled ----------------------
+    if (this.pirateMap.isOpen) this.pirateMap.draw(time);
   }
 
-  /**
-   * Faint grid lines over the water. Without a texture, this is the
-   * cheapest way to make motion across the open sea perceptible.
-   * Only the lines inside the current viewport are drawn.
-   */
-  _drawOceanGrid(ctx, viewW, viewH) {
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
-    ctx.lineWidth = 1;
+  /** Faint streaks sliding with the wind — the breeze made visible. */
+  _drawWindStreaks(ctx) {
+    const w = this.state.wind;
+    const len = 14 + w.speed * 2.2;
+    const dx = Math.cos(w.angle) * len;
+    const dy = Math.sin(w.angle) * len;
 
-    // First grid line at/after the camera's left/top edge.
-    const startX = Math.floor(this.camera.x / OCEAN_GRID) * OCEAN_GRID;
-    const startY = Math.floor(this.camera.y / OCEAN_GRID) * OCEAN_GRID;
-
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.13)";
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    for (let x = startX; x <= this.camera.x + viewW; x += OCEAN_GRID) {
-      ctx.moveTo(x, this.camera.y);
-      ctx.lineTo(x, this.camera.y + viewH);
-    }
-    for (let y = startY; y <= this.camera.y + viewH; y += OCEAN_GRID) {
-      ctx.moveTo(this.camera.x, y);
-      ctx.lineTo(this.camera.x + viewW, y);
+    for (const s of this.streaks) {
+      if (s.dead) continue;
+      ctx.moveTo(s.x - dx, s.y - dy);
+      ctx.lineTo(s.x, s.y);
     }
     ctx.stroke();
   }
 
-  /** A visible line at the edge of the world so players know it's there. */
-  _drawWorldBorder(ctx) {
-    ctx.strokeStyle = "rgba(255, 220, 150, 0.35)";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-  }
+  /**
+   * Cinematic finishing pass: a warm sun glow in the upper-left and a
+   * cool vignette pulling the eye to the center. Cheap, transformative.
+   */
+  _drawLighting(ctx, viewW, viewH) {
+    // Sunlight
+    const sun = ctx.createRadialGradient(
+      viewW * 0.18, viewH * 0.12, 0,
+      viewW * 0.18, viewH * 0.12, Math.max(viewW, viewH) * 0.5
+    );
+    sun.addColorStop(0, "rgba(255, 235, 170, 0.14)");
+    sun.addColorStop(1, "rgba(255, 235, 170, 0)");
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, viewW, viewH);
 
-  /** Sandy islands with a green interior — pure decoration for now. */
-  _drawIslands(ctx) {
-    for (const isle of this.islands) {
-      // Quick reject: skip islands entirely off-screen.
-      if (
-        isle.x + isle.r < this.camera.x ||
-        isle.x - isle.r > this.camera.x + this.canvas.width ||
-        isle.y + isle.r < this.camera.y ||
-        isle.y - isle.r > this.camera.y + this.canvas.height
-      ) {
-        continue;
-      }
-
-      // Sandy beach ring
-      ctx.fillStyle = "#d9c98a";
-      ctx.beginPath();
-      ctx.arc(isle.x, isle.y, isle.r, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Vegetated interior
-      ctx.fillStyle = "#4a7a3a";
-      ctx.beginPath();
-      ctx.arc(isle.x, isle.y, isle.r * 0.7, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // Vignette
+    const vig = ctx.createRadialGradient(
+      viewW / 2, viewH / 2, Math.min(viewW, viewH) * 0.45,
+      viewW / 2, viewH / 2, Math.max(viewW, viewH) * 0.75
+    );
+    vig.addColorStop(0, "rgba(4, 10, 20, 0)");
+    vig.addColorStop(1, "rgba(4, 10, 20, 0.42)");
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, viewW, viewH);
   }
 
   // =======================================================================

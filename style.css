@@ -42,15 +42,20 @@ body {
   color: #e8dcc0;
 }
 
-/* Shared "weathered parchment" look for every HUD panel */
+/* Shared "captain's ledger" look for every HUD panel: dark timber with
+   a brass edge and a faint gold sheen along the top. */
 .panel {
   position: absolute;
-  background: rgba(20, 30, 40, 0.75);
-  border: 1px solid rgba(232, 220, 192, 0.35);
+  background:
+    linear-gradient(rgba(240, 208, 128, 0.06), rgba(0, 0, 0, 0) 30%),
+    rgba(18, 26, 36, 0.82);
+  border: 1px solid rgba(200, 168, 100, 0.45);
   border-radius: 8px;
   padding: 10px 14px;
   backdrop-filter: blur(2px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.55),
+    inset 0 0 18px rgba(0, 0, 0, 0.35);
 }
 
 #stats-panel {
@@ -94,6 +99,7 @@ body {
 .stat-value {
   font-weight: bold;
   font-variant-numeric: tabular-nums; /* stops numbers jittering as they change */
+  color: #f0d080; /* brass — reads as treasure */
 }
 
 /* --------------------------------------------------------------------------
@@ -131,6 +137,113 @@ body {
 .hidden {
   display: none !important;
 }
+
+/* --------------------------------------------------------------------------
+   Map toggle button — sits under the wind panel, top-right.
+   -------------------------------------------------------------------------- */
+#map-toggle {
+  position: absolute;
+  top: 200px;
+  right: 16px;
+  pointer-events: auto;
+  font-family: "Pirata One", "Trebuchet MS", cursive;
+  font-size: 17px;
+  letter-spacing: 1px;
+  color: #e8dcc0;
+  background:
+    linear-gradient(rgba(240, 208, 128, 0.08), rgba(0, 0, 0, 0) 40%),
+    rgba(18, 26, 36, 0.82);
+  border: 1px solid rgba(200, 168, 100, 0.45);
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+#map-toggle:hover {
+  background: rgba(56, 80, 106, 0.85);
+}
+
+#map-toggle kbd {
+  font-family: "Trebuchet MS", sans-serif;
+  font-size: 11px;
+  background: rgba(232, 220, 192, 0.2);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/* --------------------------------------------------------------------------
+   Pirate map — a parchment scroll that unfurls from its top rod.
+   The chart itself is drawn on #map-canvas by map.js; everything
+   parchment-y (texture, burnt vibe, rods) is CSS.
+   -------------------------------------------------------------------------- */
+#pirate-map {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: rgba(5, 12, 20, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#pirate-map-scroll {
+  position: relative;
+  /* Furled state: squashed flat against the top rod. open() adds
+     .unfurled which springs it to full height — the unfurl animation. */
+  transform: scaleY(0.04);
+  transform-origin: top center;
+  opacity: 0.6;
+  transition:
+    transform 0.45s cubic-bezier(0.22, 1.4, 0.36, 1),
+    opacity 0.3s ease-out;
+}
+
+#pirate-map-scroll.unfurled {
+  transform: scaleY(1);
+  opacity: 1;
+}
+
+#map-canvas {
+  display: block;
+  width: min(520px, 88vw, 70vh);
+  height: min(520px, 88vw, 70vh);
+  /* Aged parchment: warm center, sun-stained edges, faint blotches. */
+  background:
+    radial-gradient(ellipse at 30% 25%, rgba(120, 84, 40, 0.12), transparent 50%),
+    radial-gradient(ellipse at 75% 80%, rgba(120, 84, 40, 0.14), transparent 45%),
+    radial-gradient(ellipse at center, #ecd9a8 55%, #d9bd84 85%, #c3a165 100%);
+  border-left: 3px solid #8a6a3c;
+  border-right: 3px solid #8a6a3c;
+  box-shadow: 0 12px 50px rgba(0, 0, 0, 0.8);
+}
+
+/* The wooden rods the scroll is wound around, top and bottom. */
+.scroll-rod {
+  height: 16px;
+  margin: 0 -22px; /* rods poke out past the parchment edges */
+  background: linear-gradient(#7a5230, #4e3119 60%, #2e1c0e);
+  border-radius: 8px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6);
+}
+
+/* Round end-caps on each rod */
+.scroll-rod::before,
+.scroll-rod::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #8a6038, #3a2412);
+}
+
+.scroll-rod::before { left: -22px; }
+.scroll-rod::after { right: -22px; }
+
+.scroll-rod-top::before, .scroll-rod-top::after { margin-top: 0; }
+.scroll-rod-bottom { position: relative; }
+.scroll-rod-top { position: relative; }
 
 /* --------------------------------------------------------------------------
    Dock prompt — floats above the ship panel when in range of a port.
@@ -197,8 +310,11 @@ body {
 }
 
 #port-name {
-  font-size: 26px;
-  letter-spacing: 1px;
+  font-family: "Pirata One", "Trebuchet MS", cursive;
+  font-weight: normal;
+  font-size: 32px;
+  letter-spacing: 2px;
+  color: #f0d080;
 }
 
 /* Faction badge — background color is set from JS to the faction color */
@@ -244,8 +360,9 @@ body {
   border-bottom: 3px solid transparent;
   color: #e8dcc0;
   opacity: 0.55;
-  font-size: 16px;
-  font-family: inherit;
+  font-size: 19px;
+  font-family: "Pirata One", "Trebuchet MS", cursive;
+  letter-spacing: 1.5px;
   padding: 8px 14px;
   cursor: pointer;
 }
@@ -448,8 +565,15 @@ body {
     bottom: calc(230px + env(safe-area-inset-bottom));
   }
 
-  #dock-prompt kbd {
+  #dock-prompt kbd,
+  #map-toggle kbd {
     display: none;
+  }
+
+  /* The wind panel is shorter on small screens; tuck the chart button
+     right beneath it. */
+  #map-toggle {
+    top: 170px;
   }
 
   /* Slightly tighter HUD on small screens */

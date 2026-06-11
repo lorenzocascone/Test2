@@ -216,7 +216,7 @@ export class Port {
     ctx.fill();
 
     // --- Name label with a dark halo for readability over any terrain ---
-    ctx.font = "bold 15px 'Trebuchet MS', sans-serif";
+    ctx.font = "17px 'Pirata One', 'Trebuchet MS', sans-serif";
     ctx.textAlign = "center";
     ctx.lineWidth = 4;
     ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
