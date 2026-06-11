@@ -126,6 +126,235 @@ body {
 }
 
 /* --------------------------------------------------------------------------
+   Generic visibility toggle used by the dock prompt and port menu.
+   -------------------------------------------------------------------------- */
+.hidden {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   Dock prompt — floats above the ship panel when in range of a port.
+   -------------------------------------------------------------------------- */
+#dock-prompt {
+  position: absolute;
+  bottom: 130px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  padding: 12px 22px;
+  font-size: 16px;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: #e8dcc0;
+  border: 2px solid #6b4226;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+  animation: dock-bob 1.2s ease-in-out infinite;
+}
+
+#dock-prompt kbd {
+  background: #1a1a1a;
+  color: #e8dcc0;
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 13px;
+}
+
+@keyframes dock-bob {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50%      { transform: translateX(-50%) translateY(-4px); }
+}
+
+/* --------------------------------------------------------------------------
+   Port menu — full-screen dimmed backdrop with a centered parchment panel.
+   -------------------------------------------------------------------------- */
+#port-menu {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: rgba(5, 12, 20, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#port-menu-panel {
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  background: #16222e;
+  border: 2px solid rgba(232, 220, 192, 0.5);
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+}
+
+#port-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+#port-name {
+  font-size: 26px;
+  letter-spacing: 1px;
+}
+
+/* Faction badge — background color is set from JS to the faction color */
+#port-faction {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+#port-close {
+  background: none;
+  border: 1px solid rgba(232, 220, 192, 0.4);
+  border-radius: 6px;
+  color: #e8dcc0;
+  font-size: 18px;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+}
+
+#port-close:hover {
+  background: rgba(232, 220, 192, 0.15);
+}
+
+/* --- Tabs ----------------------------------------------------------------- */
+#port-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0 14px;
+  border-bottom: 1px solid rgba(232, 220, 192, 0.25);
+}
+
+.port-tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: #e8dcc0;
+  opacity: 0.55;
+  font-size: 16px;
+  font-family: inherit;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.port-tab.active {
+  opacity: 1;
+  border-bottom-color: #7fd4ff;
+}
+
+/* Panes: only the active tab's pane is visible */
+.tab-pane {
+  display: none;
+}
+
+.tab-pane.active {
+  display: block;
+}
+
+.flavor-text {
+  font-style: italic;
+  font-size: 14px;
+  opacity: 0.75;
+  line-height: 1.5;
+  min-height: 1.5em;
+  margin-bottom: 12px;
+}
+
+/* --- Tavern ---------------------------------------------------------------- */
+.tavern-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.tavern-actions button,
+.market-row button {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 14px;
+  background: #2a3b4c;
+  color: #e8dcc0;
+  border: 1px solid rgba(232, 220, 192, 0.35);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.tavern-actions button:hover,
+.market-row button:hover {
+  background: #38506a;
+}
+
+/* --- Market ---------------------------------------------------------------- */
+.market-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(232, 220, 192, 0.15);
+}
+
+.market-good b {
+  font-size: 15px;
+}
+
+.market-good span {
+  display: block;
+  font-size: 12px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+.market-price {
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+  color: #f0d080;
+  min-width: 44px;
+  text-align: right;
+}
+
+.market-row button {
+  padding: 8px 14px;
+}
+
+/* --- Footer ---------------------------------------------------------------- */
+#port-menu-footer {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(232, 220, 192, 0.25);
+  font-size: 14px;
+}
+
+#port-menu-footer b {
+  color: #f0d080;
+  font-variant-numeric: tabular-nums;
+}
+
+#menu-status {
+  text-align: center;
+  font-size: 13px;
+  min-height: 1.2em;
+  margin-top: 8px;
+  color: #7fd4ff;
+}
+
+/* --------------------------------------------------------------------------
    Touch controls — two button clusters anchored to the bottom corners,
    sized for thumbs. Hidden entirely on devices with a fine pointer
    (mouse/trackpad); shown only where the primary pointer is coarse (touch).
@@ -211,6 +440,16 @@ body {
     bottom: calc(110px + env(safe-area-inset-bottom));
     min-width: 0;
     padding: 8px 12px;
+  }
+
+  /* Keep the dock prompt clear of the raised ship panel; hide the
+     keyboard hint inside it since there is no E key to press. */
+  #dock-prompt {
+    bottom: calc(230px + env(safe-area-inset-bottom));
+  }
+
+  #dock-prompt kbd {
+    display: none;
   }
 
   /* Slightly tighter HUD on small screens */

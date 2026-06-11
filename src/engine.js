@@ -11,6 +11,8 @@
  */
 
 import { Ship } from "./ship.js";
+import { Port, GOODS } from "./port.js";
+import { PortMenu } from "./portMenu.js";
 
 // ---------------------------------------------------------------------------
 // World tuning
@@ -30,6 +32,15 @@ const CAMERA_LERP = 3.0;
 /** Crew eat: food consumed per crew member per second (a slow trickle). */
 const FOOD_PER_CREW_PER_SEC = 0.005;
 
+/** How close (world units) the ship must be to a port to dock. */
+const DOCK_RADIUS = 240;
+
+/** Total cargo space aboard the player's ship. */
+const CARGO_CAPACITY = 60;
+
+/** Bunk limit — the tavern can't recruit past this. */
+const MAX_CREW = 60;
+
 /** Compass labels for the wind HUD, clockwise from East (angle 0). */
 const COMPASS_POINTS = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
 
@@ -45,9 +56,15 @@ export class Engine {
     // Game state — the single source of truth other modules read from.
     // -----------------------------------------------------------------
     this.state = {
-      gold: 100,
+      gold: 200,
       crew: 24,
-      food: 80,
+      maxCrew: MAX_CREW,
+
+      // Cargo hold. Food doubles as the crew's provisions — they eat it
+      // over time — and as a tradeable good. Everything here counts
+      // against maxCargo, weighted per GOODS[key].weight.
+      cargo: { food: 30, rum: 0, sugar: 0, cannons: 0 },
+      maxCargo: CARGO_CAPACITY,
 
       // Global wind vector. `angle` is the direction the wind blows
       // TOWARD (radians, canvas convention: 0 = east, clockwise +).
@@ -65,6 +82,12 @@ export class Engine {
 
     // The player's ship starts in the middle of the world.
     this.ship = new Ship(WORLD_WIDTH / 2, WORLD_HEIGHT / 2);
+
+    // -----------------------------------------------------------------
+    // Pause flag — set/cleared by the port menu. While true, update()
+    // skips all physics so the world freezes behind the docked UI.
+    // -----------------------------------------------------------------
+    this.paused = false;
 
     // -----------------------------------------------------------------
     // Camera — top-left corner of the visible viewport in world coords.
@@ -94,6 +117,21 @@ export class Engine {
       { x: 3500, y: 2200, r: 100 },
     ];
 
+    // -----------------------------------------------------------------
+    // Ports — each anchored to the coast of one of the islands above,
+    // spread across the map so trade routes mean real sailing.
+    // -----------------------------------------------------------------
+    this.ports = [
+      new Port({ x: 1200, y: 1110, name: "Santo Domingo", faction: "Spanish" }),
+      new Port({ x: 4400, y: 1690, name: "Port Royal", faction: "English" }),
+      new Port({ x: 5100, y: 4450, name: "Martinique", faction: "French" }),
+      new Port({ x: 800, y: 4680, name: "Tortuga", faction: "Pirate" }),
+    ];
+
+    // The docked-at-port UI (tabs, trading, recruiting). It toggles
+    // this.paused when opened/closed.
+    this.portMenu = new PortMenu(this);
+
     // Cache HUD elements once — querying the DOM every frame is wasteful.
     this.hud = {
       gold: document.getElementById("stat-gold"),
@@ -104,7 +142,13 @@ export class Engine {
       windArrow: document.getElementById("wind-arrow"),
       shipSpeed: document.getElementById("stat-ship-speed"),
       sails: document.getElementById("stat-sails"),
+      cargo: document.getElementById("stat-cargo"),
+      dockPrompt: document.getElementById("dock-prompt"),
+      dockPortName: document.getElementById("dock-port-name"),
     };
+
+    // Tapping/clicking the dock prompt docks too (mobile has no E key).
+    this.hud.dockPrompt.addEventListener("click", () => this._tryDock());
 
     // Size the canvas now and keep it matched to the window.
     this._resize();
@@ -135,6 +179,12 @@ export class Engine {
         this.input[action] = true;
         e.preventDefault(); // stop arrows from scrolling the page
       }
+
+      // E docks at a nearby port (or leaves, if already docked).
+      if (e.code === "KeyE") this._tryDock();
+
+      // Escape always leaves port.
+      if (e.code === "Escape" && this.portMenu.isOpen) this.portMenu.close();
     });
 
     window.addEventListener("keyup", (e) => {
@@ -192,6 +242,51 @@ export class Engine {
   }
 
   // =======================================================================
+  // Docking
+  // =======================================================================
+
+  /** The port within docking range of the ship, or null. */
+  nearestDockablePort() {
+    for (const port of this.ports) {
+      const dx = port.x - this.ship.x;
+      const dy = port.y - this.ship.y;
+      if (dx * dx + dy * dy <= DOCK_RADIUS * DOCK_RADIUS) return port;
+    }
+    return null;
+  }
+
+  /**
+   * Toggle docking: if the port menu is open, leave; otherwise dock at
+   * the nearest in-range port (if any). Docking drops anchor — speed and
+   * sails go to zero so the resume is calm rather than mid-maneuver.
+   */
+  _tryDock() {
+    if (this.portMenu.isOpen) {
+      this.portMenu.close();
+      return;
+    }
+    const port = this.nearestDockablePort();
+    if (!port) return;
+
+    this.ship.speed = 0;
+    this.ship.sail = 0;
+    this.ship.angularVelocity = 0;
+    this.hud.dockPrompt.classList.add("hidden");
+    this.portMenu.open(port); // sets this.paused = true
+  }
+
+  /** Total cargo space currently used, respecting per-good weights.
+   *  Rounded up because the crew nibbles food in fractions — a partly
+   *  eaten barrel still takes up the whole slot. */
+  cargoUsed() {
+    let used = 0;
+    for (const [key, good] of Object.entries(GOODS)) {
+      used += this.state.cargo[key] * good.weight;
+    }
+    return Math.ceil(used);
+  }
+
+  // =======================================================================
   // Per-frame update
   // =======================================================================
 
@@ -200,7 +295,19 @@ export class Engine {
    * @param {number} dt - clamped delta time from main.js
    */
   update(dt) {
+    // Docked: the world holds its breath. We still refresh the HUD so
+    // trades made in the port menu are reflected immediately, but no
+    // physics, wind, market drift, or hunger ticks happen.
+    if (this.paused) {
+      this._updateHud();
+      return;
+    }
+
     this._updateWind(dt);
+
+    // Port markets drift even while you're at sea — prices a rumor told
+    // you about may have moved by the time you arrive.
+    for (const port of this.ports) port.update(dt);
 
     // The ship reads input + wind and integrates its own physics.
     this.ship.update(dt, this.input, this.state.wind);
@@ -209,14 +316,26 @@ export class Engine {
     this.ship.x = Math.min(WORLD_WIDTH, Math.max(0, this.ship.x));
     this.ship.y = Math.min(WORLD_HEIGHT, Math.max(0, this.ship.y));
 
-    // Hungry crew nibble away at the food stores.
-    this.state.food = Math.max(
+    // Hungry crew nibble away at the food stores (from the cargo hold).
+    this.state.cargo.food = Math.max(
       0,
-      this.state.food - this.state.crew * FOOD_PER_CREW_PER_SEC * dt
+      this.state.cargo.food - this.state.crew * FOOD_PER_CREW_PER_SEC * dt
     );
 
     this._centerCameraOnShip(false, dt);
+    this._updateDockPrompt();
     this._updateHud();
+  }
+
+  /** Show/hide the "Dock at ..." prompt depending on proximity. */
+  _updateDockPrompt() {
+    const port = this.nearestDockablePort();
+    if (port && !this.portMenu.isOpen) {
+      this.hud.dockPortName.textContent = port.name;
+      this.hud.dockPrompt.classList.remove("hidden");
+    } else {
+      this.hud.dockPrompt.classList.add("hidden");
+    }
   }
 
   /**
@@ -297,6 +416,7 @@ export class Engine {
     this._drawOceanGrid(ctx, viewW, viewH);
     this._drawWorldBorder(ctx);
     this._drawIslands(ctx);
+    for (const port of this.ports) port.draw(ctx);
     this.ship.draw(ctx);
 
     ctx.restore();
@@ -367,11 +487,12 @@ export class Engine {
 
   /** Push current state into the HTML overlay. */
   _updateHud() {
-    const { gold, crew, food, wind } = this.state;
+    const { gold, crew, cargo, maxCargo, wind } = this.state;
 
     this.hud.gold.textContent = Math.floor(gold);
     this.hud.crew.textContent = crew;
-    this.hud.food.textContent = Math.floor(food);
+    this.hud.food.textContent = Math.floor(cargo.food);
+    this.hud.cargo.textContent = `${this.cargoUsed()}/${maxCargo}`;
 
     this.hud.windSpeed.textContent = `${wind.speed.toFixed(1)} kn`;
 
