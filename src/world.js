@@ -125,20 +125,44 @@ export class WorldRenderer {
       return { ...isle, pts: makeBlob(isle.x, isle.y, isle.r, isle.seed), palms, town: null };
     });
 
-    // Rock clusters: 3-5 jagged little blobs each.
+    // Rock clusters: 3-5 jagged little blobs each. `r` is kept for the
+    // engine's collision checks (stones are solid).
     this.rocks = LANDMARKS.rocks.map((rock) => {
       const rand = mulberry32(rock.seed * 31);
       const stones = [];
       const count = 3 + Math.floor(rand() * 3);
       for (let i = 0; i < count; i++) {
-        stones.push({
-          x: rock.x + (rand() - 0.5) * 120,
-          y: rock.y + (rand() - 0.5) * 120,
-          pts: makeBlob(0, 0, 14 + rand() * 18, rock.seed * 100 + i, 7),
-        });
+        const x = rock.x + (rand() - 0.5) * 120;
+        const y = rock.y + (rand() - 0.5) * 120;
+        const r = 14 + rand() * 18;
+        stones.push({ x, y, r, pts: makeBlob(0, 0, r, rock.seed * 100 + i, 7) });
       }
       return { ...rock, stones };
     });
+  }
+
+  /**
+   * The coastline radius of an island in a given direction, interpolated
+   * between the blob's noise points. Shared by port placement and the
+   * engine's land-collision checks, so ships ground on exactly the
+   * coastline that gets drawn.
+   *
+   * @param {number} islandIndex index into this.islands
+   * @param {number} angle       direction from the island center (radians)
+   * @returns {number} distance from island center to the waterline
+   */
+  coastRadius(islandIndex, angle) {
+    const isle = this.islands[islandIndex];
+    const n = isle.pts.length;
+
+    const norm = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const t = (norm / (Math.PI * 2)) * n;
+    const i0 = Math.floor(t) % n;
+    const i1 = (i0 + 1) % n;
+    const frac = t - Math.floor(t);
+
+    const radiusOf = (p) => Math.hypot(p.x - isle.x, p.y - isle.y);
+    return radiusOf(isle.pts[i0]) * (1 - frac) + radiusOf(isle.pts[i1]) * frac;
   }
 
   /**
@@ -153,19 +177,7 @@ export class WorldRenderer {
    */
   coastPoint(islandIndex, angle, scale = 1) {
     const isle = this.islands[islandIndex];
-    const n = isle.pts.length;
-
-    // Blob points sit at evenly spaced angles; find the two flanking
-    // `angle` and lerp their radii.
-    const norm = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    const t = (norm / (Math.PI * 2)) * n;
-    const i0 = Math.floor(t) % n;
-    const i1 = (i0 + 1) % n;
-    const frac = t - Math.floor(t);
-
-    const radiusOf = (p) => Math.hypot(p.x - isle.x, p.y - isle.y);
-    const radius = radiusOf(isle.pts[i0]) * (1 - frac) + radiusOf(isle.pts[i1]) * frac;
-
+    const radius = this.coastRadius(islandIndex, angle);
     return {
       x: isle.x + Math.cos(angle) * radius * scale,
       y: isle.y + Math.sin(angle) * radius * scale,

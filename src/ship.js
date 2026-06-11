@@ -246,6 +246,28 @@ export class Ship {
   }
 
   /**
+   * Burst of spray at the bow — fired by the engine when the ship runs
+   * aground at speed. Reuses the wake particle system, so the spray
+   * renders as the same churned-water streaks.
+   */
+  splash() {
+    const bowX = this.x + Math.cos(this.angle) * (this.length / 2);
+    const bowY = this.y + Math.sin(this.angle) * (this.length / 2);
+    for (let i = 0; i < 10; i++) {
+      // Spray fans out ahead of the bow in a wide cone.
+      const a = this.angle + (Math.random() - 0.5) * 2.4;
+      const v = 25 + Math.random() * 45;
+      this.wake.push({
+        x: bowX,
+        y: bowY,
+        vx: Math.cos(a) * v,
+        vy: Math.sin(a) * v,
+        life: 1,
+      });
+    }
+  }
+
+  /**
    * Draw the ship. The canvas context is assumed to already be translated
    * by the camera, so we draw in world coordinates.
    *

@@ -13,7 +13,7 @@
 import { Ship } from "./ship.js";
 import { Port, GOODS } from "./port.js";
 import { PortMenu } from "./portMenu.js";
-import { WORLD, WorldRenderer } from "./world.js";
+import { WORLD, WorldRenderer, LANDMARKS } from "./world.js";
 import { PirateMap } from "./map.js";
 
 // ---------------------------------------------------------------------------
@@ -348,6 +348,10 @@ export class Engine {
     this.ship.x = Math.min(WORLD_WIDTH, Math.max(0, this.ship.x));
     this.ship.y = Math.min(WORLD_HEIGHT, Math.max(0, this.ship.y));
 
+    // Land is solid: ground the ship on coastlines, rocks, and the
+    // lighthouse plinth rather than letting it sail over them.
+    this._resolveLandCollisions();
+
     // Hungry crew nibble away at the food stores (from the cargo hold).
     this.state.cargo.food = Math.max(
       0,
@@ -383,6 +387,100 @@ export class Engine {
         s.y = this.camera.y + Math.random() * this.canvas.height;
         s.dead = false;
       }
+    }
+  }
+
+  // =======================================================================
+  // Land collision
+  // =======================================================================
+
+  /**
+   * Keep the ship out of solid terrain. Islands use the same
+   * interpolated coastline radius the renderer draws and the ports snap
+   * to, so what you see is what you hit. Rocks and the lighthouse's
+   * plinth are simple circles.
+   *
+   * Behavior on contact ("at most they can beach on sand"):
+   *  - position clamps to the waterline, never inside land
+   *  - the INWARD component of motion is killed: hitting bow-on stops
+   *    you dead on the beach; a glancing touch lets you slide along it
+   *  - escaping is always possible — turn the bow seaward and sheet in
+   */
+  _resolveLandCollisions() {
+    const ship = this.ship;
+    // The ship's center keeps this much clearance from the waterline;
+    // less than the bow length, so a grounded ship visibly noses onto
+    // the sand without the hull climbing the beach.
+    const margin = ship.length * 0.38;
+
+    // --- Islands ---------------------------------------------------------
+    const islands = this.world.islands;
+    for (let i = 0; i < islands.length; i++) {
+      const isle = islands[i];
+      const dx = ship.x - isle.x;
+      const dy = ship.y - isle.y;
+      const dist = Math.hypot(dx, dy);
+      // Quick reject: outside the island's largest possible radius.
+      if (dist > isle.r * 1.25 + margin) continue;
+
+      const limit = this.world.coastRadius(i, Math.atan2(dy, dx)) + margin;
+      if (dist < limit) this._ground(dx, dy, dist, limit, isle.x, isle.y);
+    }
+
+    // --- Rock stones -------------------------------------------------------
+    for (const cluster of this.world.rocks) {
+      if (Math.hypot(ship.x - cluster.x, ship.y - cluster.y) > 220) continue;
+      for (const stone of cluster.stones) {
+        const dx = ship.x - stone.x;
+        const dy = ship.y - stone.y;
+        const dist = Math.hypot(dx, dy);
+        const limit = stone.r + margin * 0.8;
+        if (dist < limit) this._ground(dx, dy, dist, limit, stone.x, stone.y);
+      }
+    }
+
+    // --- Lighthouse plinth --------------------------------------------------
+    {
+      const lh = LANDMARKS.lighthouse;
+      const dx = ship.x - lh.x;
+      const dy = ship.y - lh.y;
+      const dist = Math.hypot(dx, dy);
+      const limit = 30 + margin * 0.8;
+      if (dist < limit) this._ground(dx, dy, dist, limit, lh.x, lh.y);
+    }
+  }
+
+  /**
+   * Resolve one contact: push the ship back to the waterline and strip
+   * the landward component of its motion.
+   *
+   * @param {number} dx,dy   vector from the obstacle center to the ship
+   * @param {number} dist    its length (current distance)
+   * @param {number} limit   minimum allowed distance (waterline + margin)
+   * @param {number} cx,cy   obstacle center
+   */
+  _ground(dx, dy, dist, limit, cx, cy) {
+    const ship = this.ship;
+    const d = dist || 0.001; // degenerate case: dead-center overlap
+
+    // Clamp the position out to the waterline.
+    ship.x = cx + (dx / d) * limit;
+    ship.y = cy + (dy / d) * limit;
+
+    // How squarely the ship is driving into the land: 1 = bow-on,
+    // 0 = parallel to the coast, negative = already heading away.
+    const inward =
+      -(Math.cos(ship.angle) * dx + Math.sin(ship.angle) * dy) / d;
+
+    if (inward > 0) {
+      // A hard grounding throws spray off the bow.
+      if (ship.speed * inward > 70) ship.splash();
+
+      // Kill the landward share of the speed; glancing contact keeps
+      // most of its way and slides along the beach.
+      ship.speed *= Math.max(0, 1 - inward);
+      // Grinding on sand also damps any turn-in-progress.
+      ship.angularVelocity *= 0.8;
     }
   }
 
