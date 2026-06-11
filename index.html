@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Corsair — A Top-Down Sailing Game</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- The game world is rendered entirely onto this canvas.
+       It is resized by JS to always fill the viewport. -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- HTML overlay for UI. Kept outside the canvas so we get crisp text,
+       easy layout, and no per-frame redraw cost for static elements. -->
+  <div id="ui-overlay">
+
+    <!-- Top-left: player resources -->
+    <div id="stats-panel" class="panel">
+      <div class="stat">
+        <span class="stat-label">Gold</span>
+        <span class="stat-value" id="stat-gold">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Crew</span>
+        <span class="stat-value" id="stat-crew">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Food</span>
+        <span class="stat-value" id="stat-food">0</span>
+      </div>
+    </div>
+
+    <!-- Top-right: wind information. The arrow rotates via CSS transform
+         to point in the direction the wind is blowing TOWARD. -->
+    <div id="wind-panel" class="panel">
+      <div id="wind-compass">
+        <div id="wind-arrow">&#10148;</div>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Wind</span>
+        <span class="stat-value" id="stat-wind-speed">0 kn</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">From</span>
+        <span class="stat-value" id="stat-wind-dir">N</span>
+      </div>
+    </div>
+
+    <!-- Bottom-center: ship status (speed + sail trim) -->
+    <div id="ship-panel" class="panel">
+      <div class="stat">
+        <span class="stat-label">Speed</span>
+        <span class="stat-value" id="stat-ship-speed">0 kn</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Sails</span>
+        <span class="stat-value" id="stat-sails">Furled</span>
+      </div>
+      <div id="controls-hint">
+        W/&#8593; raise sails &middot; S/&#8595; lower sails &middot; A/D or &#8592;/&#8594; steer
+      </div>
+    </div>
+
+  </div>
+
+  <!-- type="module" enables ES6 import/export across our src files -->
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

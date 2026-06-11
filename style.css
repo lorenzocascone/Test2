@@ -1,0 +1,126 @@
+/* ==========================================================================
+   Corsair — global styles
+   The canvas fills the entire viewport; the UI floats above it as an
+   HTML overlay so we never have to redraw text inside the canvas.
+   ========================================================================== */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* no scrollbars — the game owns the whole viewport */
+  background: #0a1a2a;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  user-select: none; /* avoid accidental text selection while playing */
+}
+
+/* --------------------------------------------------------------------------
+   Canvas — absolutely positioned, full screen. JS keeps its pixel size in
+   sync with the viewport on resize.
+   -------------------------------------------------------------------------- */
+#game-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+/* --------------------------------------------------------------------------
+   UI overlay — a full-screen layer that ignores pointer events so clicks
+   pass through to the canvas; individual panels re-enable them if needed.
+   -------------------------------------------------------------------------- */
+#ui-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #e8dcc0;
+}
+
+/* Shared "weathered parchment" look for every HUD panel */
+.panel {
+  position: absolute;
+  background: rgba(20, 30, 40, 0.75);
+  border: 1px solid rgba(232, 220, 192, 0.35);
+  border-radius: 8px;
+  padding: 10px 14px;
+  backdrop-filter: blur(2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+#stats-panel {
+  top: 16px;
+  left: 16px;
+  min-width: 130px;
+}
+
+#wind-panel {
+  top: 16px;
+  right: 16px;
+  min-width: 110px;
+  text-align: center;
+}
+
+#ship-panel {
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  min-width: 260px;
+}
+
+/* One labelled row inside a panel, e.g. "Gold ...... 100" */
+.stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.stat-label {
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 11px;
+  align-self: center;
+}
+
+.stat-value {
+  font-weight: bold;
+  font-variant-numeric: tabular-nums; /* stops numbers jittering as they change */
+}
+
+/* --------------------------------------------------------------------------
+   Wind compass — a circle containing an arrow that JS rotates each frame
+   to show which way the wind is blowing.
+   -------------------------------------------------------------------------- */
+#wind-compass {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 8px;
+  border: 2px solid rgba(232, 220, 192, 0.4);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#wind-arrow {
+  font-size: 26px;
+  color: #7fd4ff;
+  /* JS sets transform: rotate(...) every frame; transition smooths it out */
+  transition: transform 0.2s linear;
+  will-change: transform;
+}
+
+#controls-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.55;
+}
