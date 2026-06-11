@@ -139,6 +139,46 @@ body {
 }
 
 /* --------------------------------------------------------------------------
+   Title card — a cinematic hello that gets out of the way by itself.
+   -------------------------------------------------------------------------- */
+#title-card {
+  position: absolute;
+  top: 22%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  animation: title-fade 5s ease forwards;
+}
+
+#title-card h1 {
+  font-family: "Pirata One", "Trebuchet MS", cursive;
+  font-weight: normal;
+  font-size: clamp(56px, 12vw, 110px);
+  letter-spacing: 6px;
+  color: #f0d080;
+  text-shadow:
+    0 2px 0 #6b4226,
+    0 6px 24px rgba(0, 0, 0, 0.8);
+}
+
+#title-card p {
+  font-size: clamp(13px, 2.4vw, 18px);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  opacity: 0.85;
+  margin-top: 6px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+
+@keyframes title-fade {
+  0%   { opacity: 0; transform: translateY(14px); }
+  12%  { opacity: 1; transform: translateY(0); }
+  72%  { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
+/* --------------------------------------------------------------------------
    Map toggle button — sits under the wind panel, top-right.
    -------------------------------------------------------------------------- */
 #map-toggle {

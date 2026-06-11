@@ -182,6 +182,14 @@ export class Engine {
     this.loot = [];
     this._respawnTimer = ENEMY_RESPAWN_INTERVAL;
 
+    // Transient visual effects: water splashes where shot lands, orange
+    // bursts on hull hits. Each: {type, x, y, age}.
+    this.effects = [];
+
+    // Screen shake magnitude (pixels); spikes on firing/taking hits and
+    // decays exponentially. Applied as a camera jitter in render().
+    this.shake = 0;
+
     this.gameOver = false;
     document.getElementById("btn-restart").addEventListener("click", () => location.reload());
 
@@ -451,6 +459,7 @@ export class Engine {
       // Cargo cannons crew extra guns: 2 per side stock, up to 6.
       const ballsPerSide = 2 + Math.min(4, Math.floor(this.state.cargo.cannons));
       this._fireBroadside(ship, [-1, 1], ballsPerSide, "player", PLAYER_BALL_DAMAGE);
+      this.shake = Math.max(this.shake, 4); // the deck kicks underfoot
     }
 
     // --- Enemy ships --------------------------------------------------------
@@ -495,7 +504,14 @@ export class Engine {
       const ball = this.cannonballs[i];
       ball.update(dt);
 
-      let dead = ball.expired || this._ballHitsLand(ball);
+      let dead = false;
+      if (ball.expired) {
+        // Spent shot plunges into the sea — throw up a splash plume.
+        dead = true;
+        this.effects.push({ type: "splash", x: ball.x, y: ball.y, age: 0 });
+      } else if (this._ballHitsLand(ball)) {
+        dead = true; // thuds into the beach, no fanfare
+      }
 
       if (!dead && ball.owner === "player") {
         for (const enemy of this.enemies) {
@@ -503,6 +519,7 @@ export class Engine {
           if (Math.hypot(enemy.x - ball.x, enemy.y - ball.y) < HIT_RADIUS) {
             const sunk = enemy.takeDamage(ball.damage);
             if (sunk) this._dropLoot(enemy);
+            this.effects.push({ type: "hit", x: ball.x, y: ball.y, age: 0 });
             dead = true;
             break;
           }
@@ -510,12 +527,22 @@ export class Engine {
       } else if (!dead && ball.owner === "enemy") {
         if (Math.hypot(this.ship.x - ball.x, this.ship.y - ball.y) < HIT_RADIUS) {
           this._damagePlayer(ball.damage);
+          this.effects.push({ type: "hit", x: ball.x, y: ball.y, age: 0 });
           dead = true;
         }
       }
 
       if (dead) this.cannonballs.splice(i, 1);
     }
+
+    // --- Transient effects age out quickly --------------------------------
+    for (let i = this.effects.length - 1; i >= 0; i--) {
+      this.effects[i].age += dt;
+      if (this.effects[i].age > 0.6) this.effects.splice(i, 1);
+    }
+
+    // Screen shake settles fast.
+    this.shake = Math.max(0, this.shake - this.shake * 7 * dt);
 
     // --- Loot: drift, despawn, pick up ----------------------------------------
     for (let i = this.loot.length - 1; i >= 0; i--) {
@@ -611,6 +638,7 @@ export class Engine {
   /** Hull damage to the player: red flash, and at zero — the deep. */
   _damagePlayer(dmg) {
     this.ship.hull = Math.max(0, this.ship.hull - dmg);
+    this.shake = Math.max(this.shake, 9); // a hit rattles the whole frame
 
     // Re-trigger the CSS damage flash animation.
     this.hud.damageFlash.classList.remove("flash");
@@ -774,9 +802,10 @@ export class Engine {
 
     w._retargetTimer -= dt;
     if (w._retargetTimer <= 0) {
-      // New goal: nudge direction up to ±35° and speed within 4–12 kn.
+      // New goal: nudge direction up to ±35°, speed within 6–12 kn —
+      // never the dead calms that made crossings feel like a chore.
       w._targetAngle = w.angle + (Math.random() - 0.5) * (Math.PI / 2.5);
-      w._targetSpeed = 4 + Math.random() * 8;
+      w._targetSpeed = 6 + Math.random() * 6;
       w._retargetTimer = 6 + Math.random() * 8; // re-roll in 6–14 s
     }
 
@@ -842,9 +871,11 @@ export class Engine {
     ctx.fillRect(0, 0, viewW, viewH);
 
     // Everything below is drawn in WORLD coordinates: translate the
-    // context by the camera offset, draw, then restore.
+    // context by the camera offset (plus the shake jitter), then restore.
+    const shakeX = (Math.random() - 0.5) * 2 * this.shake;
+    const shakeY = (Math.random() - 0.5) * 2 * this.shake;
     ctx.save();
-    ctx.translate(-this.camera.x, -this.camera.y);
+    ctx.translate(-this.camera.x + shakeX, -this.camera.y + shakeY);
 
     this.world.draw(ctx, this.camera, { w: viewW, h: viewH }, time);
     for (const port of this.ports) port.draw(ctx);
@@ -852,7 +883,10 @@ export class Engine {
     for (const enemy of this.enemies) enemy.draw(ctx, time);
     this.ship.draw(ctx, time, this.state.wind);
     for (const ball of this.cannonballs) ball.draw(ctx);
+    this._drawEffects(ctx);
     this._drawWindStreaks(ctx);
+    // Clouds sail over everything at sea level.
+    this.world.drawClouds(ctx, this.camera, { w: viewW, h: viewH }, time);
 
     ctx.restore();
 
@@ -861,6 +895,36 @@ export class Engine {
 
     // --- The pirate map redraws live while unfurled ----------------------
     if (this.pirateMap.isOpen) this.pirateMap.draw(time);
+  }
+
+  /** Splashes where shot lands in the sea; orange bursts on hull hits. */
+  _drawEffects(ctx) {
+    for (const fx of this.effects) {
+      const t = fx.age / 0.6; // 0 → 1 over the effect's life
+
+      if (fx.type === "splash") {
+        // Expanding foam ring + a collapsing white plume in the middle.
+        ctx.strokeStyle = `rgba(230, 245, 255, ${0.7 * (1 - t)})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.ellipse(fx.x, fx.y, 4 + t * 30, (4 + t * 30) * 0.55, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(240, 250, 255, ${0.55 * (1 - t)})`;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y - t * 8, 5 * (1 - t) + 1, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Hull hit: a hot flash swallowed by a rising puff of smoke.
+        ctx.fillStyle = `rgba(255, 160, 60, ${0.8 * (1 - t * 1.6)})`;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, 12 * (1 - t) + 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(90, 90, 95, ${0.5 * (1 - t)})`;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y - t * 14, 4 + t * 10, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   /** Faint streaks sliding with the wind — the breeze made visible. */

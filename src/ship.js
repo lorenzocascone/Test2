@@ -20,11 +20,11 @@
 // ---------------------------------------------------------------------------
 
 /** Top speed (world units / second) with perfect wind and full sails. */
-const MAX_SPEED = 220;
+const MAX_SPEED = 255;
 
 /** How quickly the ship accelerates toward its target speed (1/s).
  *  Higher = snappier. Lower = heavier, more momentum-laden feel. */
-const ACCELERATION = 0.55;
+const ACCELERATION = 0.85;
 
 /** Passive water drag applied every frame (1/s). This is what slows the
  *  ship when sails are furled or the wind dies. */
@@ -43,11 +43,16 @@ const TURN_DAMPING = 2.5;
 
 /** How fast the crew can trim sails, in sail-fraction per second.
  *  0 → furled, 1 → full canvas. */
-const SAIL_TRIM_RATE = 0.8;
+const SAIL_TRIM_RATE = 1.1;
 
 /** Half-angle of the "no-go zone" directly upwind (radians).
  *  Inside this cone the sails luff and produce almost no power. */
-const NO_GO_ZONE = Math.PI / 6; // 30° either side of dead upwind
+const NO_GO_ZONE = Math.PI / 7.2; // 25° either side of dead upwind
+
+/** Efficiency floor outside the no-go zone. Even on a poor point of
+ *  sail the ship keeps decent way — wind angle is a meaningful bonus
+ *  to chase, never a wall that makes movement a chore. */
+const EFFICIENCY_FLOOR = 0.35;
 
 // ---------------------------------------------------------------------------
 // Small angle helper
@@ -120,10 +125,10 @@ export class Ship {
     // 0 = into the wind, PI = dead downwind.
     const fromUpwind = Math.PI - offWind;
 
-    // Inside the no-go zone: sails flap uselessly. Tiny residual value so
-    // the ship can still creep out of irons rather than being stuck forever.
+    // Inside the no-go zone: sails luff. Still some steerage way so
+    // escaping irons is quick, never a waiting game.
     if (fromUpwind < NO_GO_ZONE) {
-      return 0.05;
+      return 0.15;
     }
 
     // Outside the no-go zone we use a smooth curve that:
@@ -136,9 +141,11 @@ export class Ship {
     // both realistic and rewards skillful tacking.
     const base = Math.sin(fromUpwind);                 // 0 at irons, 0 downwind
     const broadBias = Math.sin(fromUpwind / 2);        // grows toward downwind
-    const efficiency = 0.55 * base + 0.45 * broadBias; // peak ≈ 135°
+    const curve = 0.55 * base + 0.45 * broadBias;      // peak ≈ 135°
 
-    return Math.min(1, Math.max(0, efficiency));
+    // Remap onto a generous floor: a bad angle costs you the top ~half
+    // of your speed, not all of it. Fun first, simulation second.
+    return EFFICIENCY_FLOOR + (1 - EFFICIENCY_FLOOR) * Math.min(1, Math.max(0, curve));
   }
 
   /**
@@ -175,7 +182,7 @@ export class Ship {
     // A real rudder only bites when water flows past it: scale the
     // usable turn rate with current speed (with a small floor so the
     // ship is never completely unsteerable).
-    const speedFactor = 0.25 + 0.75 * Math.min(1, this.speed / (MAX_SPEED * 0.5));
+    const speedFactor = 0.4 + 0.6 * Math.min(1, this.speed / (MAX_SPEED * 0.5));
     const maxTurn = MAX_TURN_RATE * speedFactor;
     this.angularVelocity = Math.min(maxTurn, Math.max(-maxTurn, this.angularVelocity));
 
@@ -187,7 +194,9 @@ export class Ship {
     //    point-of-sail efficiency curve. We then ease the current speed
     //    toward that target for smooth acceleration.
     // -----------------------------------------------------------------
-    const windStrength = Math.min(1, wind.speed / 10); // 10 kn ≈ "full" wind
+    // Light air still gives nearly half power — a dying breeze slows
+    // you, it doesn't park you.
+    const windStrength = 0.45 + 0.55 * Math.min(1, wind.speed / 9);
     const targetSpeed = MAX_SPEED * this.sail * windStrength * this.sailEfficiency(wind);
 
     if (targetSpeed > this.speed) {
@@ -425,6 +434,18 @@ export class Ship {
       ctx.arc(mx, 0, 2.8, 0, Math.PI * 2);
       ctx.fill();
     }
+
+    // --- Rigging: shroud lines from each masthead down to the gunwales ---
+    ctx.strokeStyle = "rgba(20, 12, 6, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const mx of [L * 0.14, -L * 0.22]) {
+      ctx.moveTo(mx, 0);
+      ctx.lineTo(mx - L * 0.12, -W * 0.44);
+      ctx.moveTo(mx, 0);
+      ctx.lineTo(mx - L * 0.12, W * 0.44);
+    }
+    ctx.stroke();
 
     // --- Pennant: a red ribbon streaming downwind from the main mast ----------
     if (wind) {

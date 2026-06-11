@@ -125,6 +125,53 @@ export class WorldRenderer {
       return { ...isle, pts: makeBlob(isle.x, isle.y, isle.r, isle.seed), palms, town: null };
     });
 
+    // -----------------------------------------------------------------
+    // Sea-depth patches: big, faint dark blotches that break up the
+    // uniform blue and make the camera's motion readable everywhere.
+    // -----------------------------------------------------------------
+    {
+      const rand = mulberry32(424242);
+      this.depthPatches = [];
+      for (let i = 0; i < 55; i++) {
+        this.depthPatches.push({
+          x: rand() * WORLD.width,
+          y: rand() * WORLD.height,
+          r: 90 + rand() * 160,
+          a: 0.05 + rand() * 0.05,
+        });
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Clouds: puffy clusters of ellipses drifting on the trade wind.
+    // Each casts a soft shadow on the sea far below (drawn separately
+    // so ships sail UNDER the clouds but OVER the shadows).
+    // -----------------------------------------------------------------
+    {
+      const rand = mulberry32(777);
+      this.clouds = [];
+      for (let i = 0; i < 9; i++) {
+        const puffs = [];
+        const count = 4 + Math.floor(rand() * 3);
+        for (let p = 0; p < count; p++) {
+          puffs.push({
+            ox: (rand() - 0.5) * 150,
+            oy: (rand() - 0.5) * 50,
+            rx: 35 + rand() * 45,
+            ry: 18 + rand() * 16,
+          });
+        }
+        this.clouds.push({
+          x: rand() * WORLD.width,
+          y: rand() * WORLD.height,
+          // Steady trade-wind drift, each cloud at its own pace.
+          vx: 16 + rand() * 14,
+          vy: 6 + rand() * 8,
+          puffs,
+        });
+      }
+    }
+
     // Rock clusters: 3-5 jagged little blobs each. `r` is kept for the
     // engine's collision checks (stones are solid).
     this.rocks = LANDMARKS.rocks.map((rock) => {
@@ -236,6 +283,7 @@ export class WorldRenderer {
    * @param {number} time                 seconds, for animation
    */
   draw(ctx, camera, view, time) {
+    this._drawDepthPatches(ctx, camera, view);
     this._drawWaveGlints(ctx, camera, view, time);
     this._drawWorldBorder(ctx);
 
@@ -255,6 +303,76 @@ export class WorldRenderer {
     this._drawSerpent(ctx, time);
     this._drawLighthouse(ctx, time);
     this._drawGulls(ctx, time);
+    this._drawCloudLayer(ctx, camera, view, time, "shadow");
+  }
+
+  /**
+   * The clouds themselves — called by the engine AFTER ships and shot,
+   * so everything at sea level passes beneath them.
+   */
+  drawClouds(ctx, camera, view, time) {
+    this._drawCloudLayer(ctx, camera, view, time, "cloud");
+  }
+
+  /**
+   * One pass over the cloud field. "shadow" draws dark smudges on the
+   * sea (offset to the south-east, as if the sun sits north-west);
+   * "cloud" draws the sunlit puffs high above.
+   */
+  _drawCloudLayer(ctx, camera, view, time, layer) {
+    const span = WORLD.width + 1200; // wrap with margin so entry is off-screen
+    const isShadow = layer === "shadow";
+
+    for (const cloud of this.clouds) {
+      // Steady drift, wrapped around the (padded) world.
+      const cx = ((cloud.x + cloud.vx * time) % span + span) % span - 600;
+      const cy = ((cloud.y + cloud.vy * time) % span + span) % span - 600;
+      // Shadows land ~90 units down-sun of the cloud.
+      const ox = isShadow ? 70 : 0;
+      const oy = isShadow ? 90 : 0;
+
+      // Cull: generous margin for the widest puff.
+      if (
+        cx + ox + 260 < camera.x || cx + ox - 260 > camera.x + view.w ||
+        cy + oy + 120 < camera.y || cy + oy - 120 > camera.y + view.h
+      ) continue;
+
+      ctx.fillStyle = isShadow ? "rgba(8, 20, 34, 0.16)" : "rgba(248, 250, 252, 0.85)";
+      for (const puff of cloud.puffs) {
+        ctx.beginPath();
+        ctx.ellipse(cx + ox + puff.ox, cy + oy + puff.oy, puff.rx, puff.ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // A brighter crown on the real cloud sells the volume.
+      if (!isShadow) {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        for (const puff of cloud.puffs) {
+          ctx.beginPath();
+          ctx.ellipse(
+            cx + puff.ox, cy + puff.oy - puff.ry * 0.3,
+            puff.rx * 0.6, puff.ry * 0.55, 0, 0, Math.PI * 2
+          );
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  /** Faint dark blotches suggesting deeper water. Static, seeded. */
+  _drawDepthPatches(ctx, camera, view) {
+    for (const patch of this.depthPatches) {
+      if (
+        patch.x + patch.r < camera.x || patch.x - patch.r > camera.x + view.w ||
+        patch.y + patch.r < camera.y || patch.y - patch.r > camera.y + view.h
+      ) continue;
+      const g = ctx.createRadialGradient(patch.x, patch.y, patch.r * 0.2, patch.x, patch.y, patch.r);
+      g.addColorStop(0, `rgba(8, 26, 44, ${patch.a})`);
+      g.addColorStop(1, "rgba(8, 26, 44, 0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(patch.x, patch.y, patch.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // =======================================================================
@@ -327,11 +445,17 @@ export class WorldRenderer {
     ctx.arc(isle.x, isle.y, isle.r * 1.55, 0, Math.PI * 2);
     ctx.fill();
 
-    // Gentle animated surf line just off the beach.
+    // Two surf lines breathing out of phase — waves rolling onto sand.
     const surfScale = 1.06 + 0.02 * Math.sin(time * 1.2 + isle.seed);
     traceBlob(ctx, isle.pts, isle.x, isle.y, surfScale);
     ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
     ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    const surf2 = 1.13 + 0.03 * Math.sin(time * 1.2 + isle.seed + Math.PI);
+    traceBlob(ctx, isle.pts, isle.x, isle.y, surf2);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+    ctx.lineWidth = 2;
     ctx.stroke();
 
     // Beach, then two bands of vegetation using the same coastline.
