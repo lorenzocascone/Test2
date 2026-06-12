@@ -30,6 +30,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The deploy steps never push back to the repo, so don't leave
+          # the workflow token sitting in .git/config on the runner.
+          persist-credentials: false
 
       # enablement: true asks GitHub to switch Pages on for the repo
       # automatically if it isn't already.

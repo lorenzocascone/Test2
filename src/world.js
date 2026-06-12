@@ -128,6 +128,8 @@ export class WorldRenderer {
     // -----------------------------------------------------------------
     // Sea-depth patches: big, faint dark blotches that break up the
     // uniform blue and make the camera's motion readable everywhere.
+    // Rendered from one shared pre-baked radial sprite — building a
+    // fresh gradient per patch per frame was pure GC churn.
     // -----------------------------------------------------------------
     {
       const rand = mulberry32(424242);
@@ -140,6 +142,16 @@ export class WorldRenderer {
           a: 0.05 + rand() * 0.05,
         });
       }
+
+      const sprite = document.createElement("canvas");
+      sprite.width = sprite.height = 128;
+      const sc = sprite.getContext("2d");
+      const g = sc.createRadialGradient(64, 64, 14, 64, 64, 64);
+      g.addColorStop(0, "rgba(8, 26, 44, 1)");
+      g.addColorStop(1, "rgba(8, 26, 44, 0)");
+      sc.fillStyle = g;
+      sc.fillRect(0, 0, 128, 128);
+      this._depthSprite = sprite;
     }
 
     // -----------------------------------------------------------------
@@ -271,6 +283,7 @@ export class WorldRenderer {
     );
 
     isle.town = { center: inland, pier, houses };
+    isle.sprite = null; // invalidate any baked art so the town gets included
   }
 
   /**
@@ -298,12 +311,32 @@ export class WorldRenderer {
     }
 
     this._drawRocks(ctx, camera, view);
-    this._drawWreck(ctx, time);
-    this._drawWhirlpool(ctx, time);
-    this._drawSerpent(ctx, time);
-    this._drawLighthouse(ctx, time);
+
+    // Landmarks skip all their work (including gradient builds) when
+    // they're nowhere near the viewport.
+    if (this._inView(LANDMARKS.wreck.x, LANDMARKS.wreck.y, 120, camera, view)) {
+      this._drawWreck(ctx, time);
+    }
+    if (this._inView(LANDMARKS.whirlpool.x, LANDMARKS.whirlpool.y, 120, camera, view)) {
+      this._drawWhirlpool(ctx, time);
+    }
+    if (this._inView(LANDMARKS.serpent.x, LANDMARKS.serpent.y, LANDMARKS.serpent.radius + 80, camera, view)) {
+      this._drawSerpent(ctx, time);
+    }
+    if (this._inView(LANDMARKS.lighthouse.x, LANDMARKS.lighthouse.y, 260, camera, view)) {
+      this._drawLighthouse(ctx, time);
+    }
+
     this._drawGulls(ctx, time);
     this._drawCloudLayer(ctx, camera, view, time, "shadow");
+  }
+
+  /** Is a point within `margin` of the visible viewport? */
+  _inView(x, y, margin, camera, view) {
+    return (
+      x + margin >= camera.x && x - margin <= camera.x + view.w &&
+      y + margin >= camera.y && y - margin <= camera.y + view.h
+    );
   }
 
   /**
@@ -358,21 +391,22 @@ export class WorldRenderer {
     }
   }
 
-  /** Faint dark blotches suggesting deeper water. Static, seeded. */
+  /** Faint dark blotches suggesting deeper water. Static, seeded,
+   *  stamped from the pre-baked sprite (zero per-frame allocation). */
   _drawDepthPatches(ctx, camera, view) {
     for (const patch of this.depthPatches) {
       if (
         patch.x + patch.r < camera.x || patch.x - patch.r > camera.x + view.w ||
         patch.y + patch.r < camera.y || patch.y - patch.r > camera.y + view.h
       ) continue;
-      const g = ctx.createRadialGradient(patch.x, patch.y, patch.r * 0.2, patch.x, patch.y, patch.r);
-      g.addColorStop(0, `rgba(8, 26, 44, ${patch.a})`);
-      g.addColorStop(1, "rgba(8, 26, 44, 0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(patch.x, patch.y, patch.r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalAlpha = patch.a;
+      ctx.drawImage(
+        this._depthSprite,
+        patch.x - patch.r, patch.y - patch.r,
+        patch.r * 2, patch.r * 2
+      );
     }
+    ctx.globalAlpha = 1;
   }
 
   // =======================================================================
@@ -435,15 +469,17 @@ export class WorldRenderer {
   // Islands
   // =======================================================================
 
+  /**
+   * Islands are drawn in two layers:
+   *  - a STATIC sprite (glow, beach, vegetation, mountain, town) baked
+   *    once to an offscreen canvas the first time the island is seen —
+   *    every fill, gradient and house was previously rebuilt per frame;
+   *  - the ANIMATED bits (breathing surf, swaying palms, chimney smoke)
+   *    drawn live on top, since they're a handful of cheap strokes.
+   */
   _drawIsland(ctx, isle, time) {
-    // Shallow turquoise water haloing the island — gives a depth feel.
-    const glow = ctx.createRadialGradient(isle.x, isle.y, isle.r * 0.6, isle.x, isle.y, isle.r * 1.55);
-    glow.addColorStop(0, "rgba(72, 180, 190, 0.35)");
-    glow.addColorStop(1, "rgba(72, 180, 190, 0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(isle.x, isle.y, isle.r * 1.55, 0, Math.PI * 2);
-    ctx.fill();
+    if (!isle.sprite) this._bakeIsland(isle);
+    ctx.drawImage(isle.sprite, isle.spriteX, isle.spriteY);
 
     // Two surf lines breathing out of phase — waves rolling onto sand.
     const surfScale = 1.06 + 0.02 * Math.sin(time * 1.2 + isle.seed);
@@ -458,53 +494,84 @@ export class WorldRenderer {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Beach, then two bands of vegetation using the same coastline.
-    traceBlob(ctx, isle.pts, isle.x, isle.y, 1);
-    ctx.fillStyle = "#e3cf94";
-    ctx.fill();
-
-    traceBlob(ctx, isle.pts, isle.x, isle.y, 0.82);
-    ctx.fillStyle = "#5d9143";
-    ctx.fill();
-
-    traceBlob(ctx, isle.pts, isle.x, isle.y, 0.55);
-    ctx.fillStyle = "#3f7233";
-    ctx.fill();
-
-    // Mountain peak for the big islands.
-    if (isle.peak) {
-      const px = isle.x, py = isle.y;
-      const s = isle.r * 0.32;
-      ctx.fillStyle = "#6e6657";
-      ctx.beginPath();
-      ctx.moveTo(px - s, py + s * 0.6);
-      ctx.lineTo(px - s * 0.2, py - s);
-      ctx.lineTo(px + s * 0.3, py + s * 0.1);
-      ctx.lineTo(px + s, py + s * 0.55);
-      ctx.closePath();
-      ctx.fill();
-      // Sunlit face
-      ctx.fillStyle = "#8a8270";
-      ctx.beginPath();
-      ctx.moveTo(px - s * 0.2, py - s);
-      ctx.lineTo(px + s * 0.3, py + s * 0.1);
-      ctx.lineTo(px + s, py + s * 0.55);
-      ctx.lineTo(px + s * 0.15, py + s * 0.2);
-      ctx.closePath();
-      ctx.fill();
-    }
-
     // Palm trees, gently swaying.
     for (const palm of isle.palms) {
       this._drawPalm(ctx, palm, time);
     }
 
-    // The harbor town, if this island has one.
-    if (isle.town) this._drawTown(ctx, isle.town, time);
+    // The town's chimney smoke (houses themselves are in the sprite).
+    if (isle.town) this._drawTownSmoke(ctx, isle.town, time);
   }
 
-  /** Houses, the path to the dock, and a smoking chimney. */
-  _drawTown(ctx, town, time) {
+  /** Render an island's static art once, into an offscreen canvas. */
+  _bakeIsland(isle) {
+    // The sprite must cover the widest thing we draw: the shallow-water
+    // glow at 1.55 × nominal radius (blob noise peaks at ~1.18 × r).
+    const reach = Math.ceil(isle.r * 1.6) + 8;
+    const size = reach * 2;
+    const sprite = document.createElement("canvas");
+    sprite.width = size;
+    sprite.height = size;
+    const c = sprite.getContext("2d");
+    // Shift so world coordinates land inside the sprite — all the
+    // existing drawing code works unchanged.
+    c.translate(reach - isle.x, reach - isle.y);
+
+    // Shallow turquoise water haloing the island — gives a depth feel.
+    const glow = c.createRadialGradient(isle.x, isle.y, isle.r * 0.6, isle.x, isle.y, isle.r * 1.55);
+    glow.addColorStop(0, "rgba(72, 180, 190, 0.35)");
+    glow.addColorStop(1, "rgba(72, 180, 190, 0)");
+    c.fillStyle = glow;
+    c.beginPath();
+    c.arc(isle.x, isle.y, isle.r * 1.55, 0, Math.PI * 2);
+    c.fill();
+
+    // Beach, then two bands of vegetation using the same coastline.
+    traceBlob(c, isle.pts, isle.x, isle.y, 1);
+    c.fillStyle = "#e3cf94";
+    c.fill();
+
+    traceBlob(c, isle.pts, isle.x, isle.y, 0.82);
+    c.fillStyle = "#5d9143";
+    c.fill();
+
+    traceBlob(c, isle.pts, isle.x, isle.y, 0.55);
+    c.fillStyle = "#3f7233";
+    c.fill();
+
+    // Mountain peak for the big islands.
+    if (isle.peak) {
+      const px = isle.x, py = isle.y;
+      const s = isle.r * 0.32;
+      c.fillStyle = "#6e6657";
+      c.beginPath();
+      c.moveTo(px - s, py + s * 0.6);
+      c.lineTo(px - s * 0.2, py - s);
+      c.lineTo(px + s * 0.3, py + s * 0.1);
+      c.lineTo(px + s, py + s * 0.55);
+      c.closePath();
+      c.fill();
+      // Sunlit face
+      c.fillStyle = "#8a8270";
+      c.beginPath();
+      c.moveTo(px - s * 0.2, py - s);
+      c.lineTo(px + s * 0.3, py + s * 0.1);
+      c.lineTo(px + s, py + s * 0.55);
+      c.lineTo(px + s * 0.15, py + s * 0.2);
+      c.closePath();
+      c.fill();
+    }
+
+    // The town (path + houses) is static too — bake it in.
+    if (isle.town) this._drawTownStatic(c, isle.town);
+
+    isle.sprite = sprite;
+    isle.spriteX = isle.x - reach;
+    isle.spriteY = isle.y - reach;
+  }
+
+  /** Houses and the path to the dock — static, baked into the sprite. */
+  _drawTownStatic(ctx, town) {
     // Dirt path: a gentle curve from the village square to the pier.
     const midX = (town.center.x + town.pier.x) / 2 + 12;
     const midY = (town.center.y + town.pier.y) / 2 - 8;
@@ -542,9 +609,12 @@ export class WorldRenderer {
 
       ctx.restore();
     }
+  }
 
-    // Chimney smoke from the first (largest-ish) house: three puffs on a
-    // looping cycle, drifting up-left and fading as they grow.
+  /** The animated chimney smoke, drawn live over the baked town. */
+  _drawTownSmoke(ctx, town, time) {
+    // Three puffs on a looping cycle from the first house, drifting
+    // up-left and fading as they grow.
     const h0 = town.houses[0];
     ctx.fillStyle = "#cfd8dd";
     for (let k = 0; k < 3; k++) {
@@ -664,11 +734,14 @@ export class WorldRenderer {
     ctx.save();
     ctx.translate(x, y);
 
-    // Dark depression in the water.
-    const pit = ctx.createRadialGradient(0, 0, 4, 0, 0, 80);
-    pit.addColorStop(0, "rgba(6, 22, 38, 0.85)");
-    pit.addColorStop(1, "rgba(6, 22, 38, 0)");
-    ctx.fillStyle = pit;
+    // Dark depression in the water. Local coordinates after the
+    // translate, so the gradient is constant — build once, reuse.
+    if (!this._pitGrad) {
+      this._pitGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, 80);
+      this._pitGrad.addColorStop(0, "rgba(6, 22, 38, 0.85)");
+      this._pitGrad.addColorStop(1, "rgba(6, 22, 38, 0)");
+    }
+    ctx.fillStyle = this._pitGrad;
     ctx.beginPath();
     ctx.arc(0, 0, 80, 0, Math.PI * 2);
     ctx.fill();

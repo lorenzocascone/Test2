@@ -6,6 +6,13 @@
        fighting the touch controls; viewport-fit=cover fills notched phones -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Corsair — A Top-Down Sailing Game</title>
+  <!-- Content Security Policy: scripts only from this origin, styles/fonts
+       only from here + Google Fonts, no plugins/frames/forms/connections.
+       GitHub Pages can't set HTTP headers, so the meta tag is the vehicle.
+       Defense-in-depth: even if an injection bug appeared, foreign script
+       could not load and data could not be exfiltrated via fetch. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'" />
   <!-- Pirate display font for titles & the chart; falls back gracefully -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

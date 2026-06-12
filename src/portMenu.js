@@ -106,7 +106,9 @@ export class PortMenu {
 
   close() {
     this.port = null;
-    this.engine.paused = false; // physics resumes on the next frame
+    // Physics resumes on the next frame — unless the game has ended,
+    // in which case the world stays frozen behind the game-over screen.
+    if (!this.engine.gameOver) this.engine.paused = false;
     this.el.root.classList.add("hidden");
   }
 

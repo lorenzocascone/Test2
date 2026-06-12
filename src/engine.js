@@ -250,6 +250,10 @@ export class Engine {
     };
 
     window.addEventListener("keydown", (e) => {
+      // After game over only the restart button works — otherwise E
+      // could reopen a port menu and un-pause a dead game.
+      if (this.gameOver) return;
+
       const action = keyMap[e.code];
       if (action) {
         this.input[action] = true;
@@ -344,6 +348,7 @@ export class Engine {
    * sails go to zero so the resume is calm rather than mid-maneuver.
    */
   _tryDock() {
+    if (this.gameOver) return;
     if (this.portMenu.isOpen) {
       this.portMenu.close();
       return;
@@ -540,6 +545,8 @@ export class Engine {
       this.effects[i].age += dt;
       if (this.effects[i].age > 0.6) this.effects.splice(i, 1);
     }
+    // Same safety valve as cannonballs: bounded no matter what.
+    if (this.effects.length > 60) this.effects.splice(0, this.effects.length - 60);
 
     // Screen shake settles fast.
     this.shake = Math.max(0, this.shake - this.shake * 7 * dt);
@@ -597,7 +604,11 @@ export class Engine {
           Math.cos(shooter.angle) * side * (shooter.width / 2);
         // Perpendicular to the keel, with a touch of gunner's scatter.
         const dir = shooter.angle + (side * Math.PI) / 2 + (Math.random() - 0.5) * 0.12;
-        this.cannonballs.push(new Cannonball(mx, my, dir, owner, damage));
+        // Hard cap as a safety valve — no input pattern should ever be
+        // able to grow this array (and the per-frame work) without bound.
+        if (this.cannonballs.length < 150) {
+          this.cannonballs.push(new Cannonball(mx, my, dir, owner, damage));
+        }
       }
     }
   }
@@ -770,8 +781,12 @@ export class Engine {
       -(Math.cos(ship.angle) * dx + Math.sin(ship.angle) * dy) / d;
 
     if (inward > 0) {
-      // A hard grounding throws spray off the bow.
-      if (ship.speed * inward > 70) ship.splash();
+      // A hard grounding throws spray off the bow. Only the player ship
+      // has a particle system; AI hulls ground silently. (Calling a
+      // missing method here once crashed the whole game loop.)
+      if (ship.speed * inward > 70 && typeof ship.splash === "function") {
+        ship.splash();
+      }
 
       // Kill the landward share of the speed; glancing contact keeps
       // most of its way and slides along the beach.
@@ -863,11 +878,8 @@ export class Engine {
     // behind the port menu (only PHYSICS pauses, not ambience).
     const time = performance.now() / 1000;
 
-    // --- Deep-sea gradient base (screen space) ---------------------------
-    const sea = ctx.createLinearGradient(0, 0, 0, viewH);
-    sea.addColorStop(0, "#1f5b80");
-    sea.addColorStop(1, "#143a55");
-    ctx.fillStyle = sea;
+    // --- Deep-sea gradient base (screen space, cached on resize) ---------
+    ctx.fillStyle = this._seaGrad;
     ctx.fillRect(0, 0, viewW, viewH);
 
     // Everything below is drawn in WORLD coordinates: translate the
@@ -877,7 +889,7 @@ export class Engine {
     ctx.save();
     ctx.translate(-this.camera.x + shakeX, -this.camera.y + shakeY);
 
-    this.world.draw(ctx, this.camera, { w: viewW, h: viewH }, time);
+    this.world.draw(ctx, this.camera, this._view, time);
     for (const port of this.ports) port.draw(ctx);
     for (const item of this.loot) item.draw(ctx, time);
     for (const enemy of this.enemies) enemy.draw(ctx, time);
@@ -886,7 +898,7 @@ export class Engine {
     this._drawEffects(ctx);
     this._drawWindStreaks(ctx);
     // Clouds sail over everything at sea level.
-    this.world.drawClouds(ctx, this.camera, { w: viewW, h: viewH }, time);
+    this.world.drawClouds(ctx, this.camera, this._view, time);
 
     ctx.restore();
 
@@ -948,27 +960,14 @@ export class Engine {
 
   /**
    * Cinematic finishing pass: a warm sun glow in the upper-left and a
-   * cool vignette pulling the eye to the center. Cheap, transformative.
+   * cool vignette pulling the eye to the center. Both gradients are
+   * cached in _resize() — only the two fills happen per frame.
    */
   _drawLighting(ctx, viewW, viewH) {
-    // Sunlight
-    const sun = ctx.createRadialGradient(
-      viewW * 0.18, viewH * 0.12, 0,
-      viewW * 0.18, viewH * 0.12, Math.max(viewW, viewH) * 0.5
-    );
-    sun.addColorStop(0, "rgba(255, 235, 170, 0.14)");
-    sun.addColorStop(1, "rgba(255, 235, 170, 0)");
-    ctx.fillStyle = sun;
+    ctx.fillStyle = this._sunGrad;
     ctx.fillRect(0, 0, viewW, viewH);
 
-    // Vignette
-    const vig = ctx.createRadialGradient(
-      viewW / 2, viewH / 2, Math.min(viewW, viewH) * 0.45,
-      viewW / 2, viewH / 2, Math.max(viewW, viewH) * 0.75
-    );
-    vig.addColorStop(0, "rgba(4, 10, 20, 0)");
-    vig.addColorStop(1, "rgba(4, 10, 20, 0.42)");
-    ctx.fillStyle = vig;
+    ctx.fillStyle = this._vigGrad;
     ctx.fillRect(0, 0, viewW, viewH);
   }
 
@@ -1024,5 +1023,33 @@ export class Engine {
   _resize() {
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
+
+    // Screen-space gradients depend only on the viewport, so they're
+    // rebuilt here instead of being re-created every frame (gradient
+    // construction was a measurable per-frame GC cost).
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+
+    this._seaGrad = ctx.createLinearGradient(0, 0, 0, h);
+    this._seaGrad.addColorStop(0, "#1f5b80");
+    this._seaGrad.addColorStop(1, "#143a55");
+
+    this._sunGrad = ctx.createRadialGradient(
+      w * 0.18, h * 0.12, 0,
+      w * 0.18, h * 0.12, Math.max(w, h) * 0.5
+    );
+    this._sunGrad.addColorStop(0, "rgba(255, 235, 170, 0.14)");
+    this._sunGrad.addColorStop(1, "rgba(255, 235, 170, 0)");
+
+    this._vigGrad = ctx.createRadialGradient(
+      w / 2, h / 2, Math.min(w, h) * 0.45,
+      w / 2, h / 2, Math.max(w, h) * 0.75
+    );
+    this._vigGrad.addColorStop(0, "rgba(4, 10, 20, 0)");
+    this._vigGrad.addColorStop(1, "rgba(4, 10, 20, 0.42)");
+
+    // Reused per-frame view rectangle (avoids two object literals/frame).
+    this._view = { w, h };
   }
 }

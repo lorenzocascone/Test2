@@ -344,11 +344,15 @@ export class Ship {
     ctx.fill();
 
     // --- Hull: planked timber with a lit port side ------------------------
-    const hullGrad = ctx.createLinearGradient(0, -W / 2, 0, W / 2);
-    hullGrad.addColorStop(0, "#8a5a33");
-    hullGrad.addColorStop(0.5, "#6b4226");
-    hullGrad.addColorStop(1, "#4e3019");
-    ctx.fillStyle = hullGrad;
+    // The gradient lives in local (rotated) coordinates, so it's the
+    // same object every frame — build it once and cache it.
+    if (!this._hullGrad) {
+      this._hullGrad = ctx.createLinearGradient(0, -W / 2, 0, W / 2);
+      this._hullGrad.addColorStop(0, "#8a5a33");
+      this._hullGrad.addColorStop(0.5, "#6b4226");
+      this._hullGrad.addColorStop(1, "#4e3019");
+    }
+    ctx.fillStyle = this._hullGrad;
     ctx.strokeStyle = "#2e1d10";
     ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -406,15 +410,25 @@ export class Ship {
         { x: L * 0.14, span: W * 1.9 },  // main mast — the big one
         { x: -L * 0.22, span: W * 1.4 }, // mizzen — smaller, astern
       ];
-      for (const mast of masts) {
+      // Sail shading gradients are cached per mast: the shading runs
+      // over the sail's maximum depth in fixed local coordinates, so it
+      // doesn't need rebuilding as the belly animates.
+      if (!this._sailGrads) {
+        this._sailGrads = masts.map((mast) => {
+          const g = ctx.createLinearGradient(mast.x, 0, mast.x - L / 3.4, 0);
+          g.addColorStop(0, "#f7f2e3");
+          g.addColorStop(1, "#d9d0b8");
+          return g;
+        });
+      }
+
+      for (let m = 0; m < masts.length; m++) {
+        const mast = masts[m];
         const half = (mast.span * this.sail) / 2;
         // Belly of the sail bows backward; a hint of flutter when slack.
         const belly = L / 3.4 * this.sail + Math.sin(time * 6 + mast.x) * (1 - this.sail) * 2;
 
-        const sailGrad = ctx.createLinearGradient(mast.x, 0, mast.x - belly, 0);
-        sailGrad.addColorStop(0, "#f7f2e3");
-        sailGrad.addColorStop(1, "#d9d0b8");
-        ctx.fillStyle = sailGrad;
+        ctx.fillStyle = this._sailGrads[m];
         ctx.strokeStyle = "#8d8470";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
